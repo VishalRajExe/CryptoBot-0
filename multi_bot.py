@@ -680,12 +680,7 @@ class AssetBot:
 # ─────────────────────────────────────────────────────────────────────────────
 #  ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--symbol", default=None,
-                        help="Run single asset (e.g. SOL/USD). Omit to run all.")
-    args = parser.parse_args()
-
+def start_all_bots(symbol: Optional[str] = None):
     global API_KEY, API_SECRET
     while not API_KEY or not API_SECRET:
         print("❌ Missing Alpaca API credentials in environment (ALPACA_API_KEY / ALPACA_SECRET_KEY)!")
@@ -695,29 +690,46 @@ def main():
         API_KEY = os.getenv("ALPACA_API_KEY", "")
         API_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
 
-    if args.symbol:
-        if args.symbol not in ASSET_CONFIG:
-            print(f"❌ Unknown symbol: {args.symbol}. Available: {list(ASSET_CONFIG.keys())}")
-            sys.exit(1)
-        cfg = ASSET_CONFIG[args.symbol]
-        bot = AssetBot(args.symbol, cfg)
-        bot.run()
+    if symbol:
+        if symbol not in ASSET_CONFIG:
+            print(f"❌ Unknown symbol: {symbol}. Available: {list(ASSET_CONFIG.keys())}")
+            return []
+        cfg = ASSET_CONFIG[symbol]
+        bot = AssetBot(symbol, cfg)
+        t = threading.Thread(target=bot.run, name=f"Bot-{symbol}", daemon=True)
+        t.start()
+        print(f"✅ Started persistent thread for {symbol} ({cfg['strategy'].NAME})")
+        return [t]
     else:
         threads = []
         for sym, cfg in ASSET_CONFIG.items():
-            bot = AssetBot(sym, cfg)
-            t   = threading.Thread(target=bot.run, name=f"Bot-{sym}", daemon=True)
-            t.start()
-            threads.append(t)
-            print(f"✅ Started persistent thread for {sym}  ({cfg['strategy'].NAME})")
-            time.sleep(2)
+            try:
+                bot = AssetBot(sym, cfg)
+                t = threading.Thread(target=bot.run, name=f"Bot-{sym}", daemon=True)
+                t.start()
+                threads.append(t)
+                print(f"✅ Started persistent thread for {sym}  ({cfg['strategy'].NAME})")
+                time.sleep(2)
+            except Exception as e:
+                print(f"❌ Error starting bot for {sym}: {e}")
 
-        print(f"\n🚀 All {len(threads)} asset bots running with SQLite Memory & AI Learner. Ctrl+C to stop.\n")
-        try:
-            while True:
-                time.sleep(30)
-        except KeyboardInterrupt:
-            print("\n🛑 Shutting down bots...")
+        print(f"\n🚀 All {len(threads)} asset bots running with SQLite Memory & AI Learner.\n")
+        return threads
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--symbol", default=None,
+                        help="Run single asset (e.g. SOL/USD). Omit to run all.")
+    args = parser.parse_args()
+
+    start_all_bots(symbol=args.symbol)
+
+    try:
+        while True:
+            time.sleep(30)
+    except KeyboardInterrupt:
+        print("\n🛑 Shutting down bots...")
 
 
 if __name__ == "__main__":

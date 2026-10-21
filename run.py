@@ -59,25 +59,16 @@ def main():
     dash_thread.start()
     time.sleep(1)
 
-    if args.one_bot:
-        cmd = [sys.executable, os.path.join(BASE, "alpaca_btc_bot.py")]
-    else:
-        cmd = [sys.executable, os.path.join(BASE, "multi_bot.py")]
-        if args.symbol:
-            cmd += ["--symbol", args.symbol]
+    # Start bot engines in the same process (saves ~250MB RAM on Render 512MB free tier)
+    target_sym = "BTC/USD" if args.one_bot else args.symbol
+    from multi_bot import start_all_bots
+    start_all_bots(symbol=target_sym)
 
-    print(f"🚀  Launching: {' '.join(cmd)}\n")
-    while True:
-        try:
-            proc = subprocess.run(cmd)
-            print(f"⚠️ Bot process exited (code {proc.returncode}). Restarting in 15s...")
-            time.sleep(15)
-        except KeyboardInterrupt:
-            print("\n🛑  Stopped by user.")
-            break
-        except Exception as e:
-            print(f"Runner caught exception: {e}. Retrying in 15s...")
-            time.sleep(15)
+    try:
+        while True:
+            time.sleep(30)
+    except KeyboardInterrupt:
+        print("\n🛑  Stopped by user.")
 
 
 if __name__ == "__main__":
