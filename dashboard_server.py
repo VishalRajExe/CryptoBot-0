@@ -132,22 +132,16 @@ def get_backtest_summaries() -> list:
                 results.append(summary)
         except Exception:
             pass
-_bots_started = False
-_bots_lock = threading.Lock()
-
-
 def ensure_bots_running():
-    global _bots_started
-    with _bots_lock:
-        if not _bots_started:
-            _bots_started = True
-            try:
-                from multi_bot import start_all_bots
-                t = threading.Thread(target=start_all_bots, daemon=True, name="BotSupervisor")
-                t.start()
-                print("🚀 Bot supervisor started in background thread.")
-            except Exception as e:
-                print(f"❌ Error starting bot supervisor: {e}")
+    active_bot_count = len([t for t in threading.enumerate() if t.name.startswith("Bot-") and t.is_alive()])
+    if active_bot_count < 7:
+        try:
+            from multi_bot import start_all_bots
+            t = threading.Thread(target=start_all_bots, daemon=True, name="BotSupervisor")
+            t.start()
+        except Exception as e:
+            print(f"❌ Error starting bot supervisor: {e}")
+
 
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):

@@ -154,15 +154,15 @@ def _make_logger(symbol: str) -> logging.Logger:
 #  TELEGRAM
 # ─────────────────────────────────────────────────────────────────────────────
 def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
-    if not TELEGRAM_ENABLED or not TELEGRAM_BOT_TOKEN:
-        return False
-    target = chat_id or TELEGRAM_CHAT_ID
-    if not target:
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "") or TELEGRAM_BOT_TOKEN
+    target = chat_id or os.getenv("TELEGRAM_CHAT_ID", "") or TELEGRAM_CHAT_ID
+    enabled = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
+    if not enabled or not token or not target:
         return False
     try:
         import urllib.parse
         import urllib.request
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = urllib.parse.urlencode({
             "chat_id": str(target),
             "text": text,
@@ -178,6 +178,7 @@ def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
     except Exception as e:
         logging.getLogger("ECB.TG").warning("Telegram send failed: %s", e)
         return False
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -680,41 +681,67 @@ class AssetBot:
 # ─────────────────────────────────────────────────────────────────────────────
 #  ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
-def start_all_bots(symbol: Optional[str] = None):
-    global API_KEY, API_SECRET
-    while not API_KEY or not API_SECRET:
-        print("❌ Missing Alpaca API credentials in environment (ALPACA_API_KEY / ALPACA_SECRET_KEY)!")
-        print("   Please set them in Render Dashboard -> Environment Variables. Retrying in 20s...")
-        time.sleep(20)
-        load_dotenv()
-        API_KEY = os.getenv("ALPACA_API_KEY", "")
-        API_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
+_active_bot_threads: dict[str, threading.Thread] = {}
+_bot_start_lock = threading.Lock()
 
-    if symbol:
-        if symbol not in ASSET_CONFIG:
-            print(f"❌ Unknown symbol: {symbol}. Available: {list(ASSET_CONFIG.keys())}")
-            return []
-        cfg = ASSET_CONFIG[symbol]
-        bot = AssetBot(symbol, cfg)
-        t = threading.Thread(target=bot.run, name=f"Bot-{symbol}", daemon=True)
-        t.start()
-        print(f"✅ Started persistent thread for {symbol} ({cfg['strategy'].NAME})")
-        return [t]
-    else:
-        threads = []
-        for sym, cfg in ASSET_CONFIG.items():
+
+def start_all_bots(symbol: Optional[str] = None):
+    global API_KEY, API_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED
+
+    # Reload latest environment variables
+    load_dotenv()
+    API_KEY = os.getenv("ALPACA_API_KEY", "") or API_KEY
+    API_SECRET = os.getenv("ALPACA_SECRET_KEY", "") or API_SECRET
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "") or TELEGRAM_BOT_TOKEN
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "") or TELEGRAM_CHAT_ID
+    TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
+
+    if not API_KEY or not API_SECRET:
+        print("⚠️ Missing Alpaca API credentials in environment. Bot waiting for keys...")
+        return []
+
+    with _bot_start_lock:
+        targets = [symbol] if symbol else list(ASSET_CONFIG.keys())
+        started_new = []
+
+        for sym in targets:
+            if sym not in ASSET_CONFIG:
+                print(f"❌ Unknown symbol: {sym}. Available: {list(ASSET_CONFIG.keys())}")
+                continue
+
+            existing = _active_bot_threads.get(sym)
+            if existing and existing.is_alive():
+                continue  # Bot thread already active and healthy
+
+            cfg = ASSET_CONFIG[sym]
             try:
                 bot = AssetBot(sym, cfg)
                 t = threading.Thread(target=bot.run, name=f"Bot-{sym}", daemon=True)
                 t.start()
-                threads.append(t)
-                print(f"✅ Started persistent thread for {sym}  ({cfg['strategy'].NAME})")
-                time.sleep(2)
+                _active_bot_threads[sym] = t
+                started_new.append(sym)
+                print(f"✅ Started persistent thread for {sym} ({cfg['strategy'].NAME})")
+                time.sleep(1.5)
             except Exception as e:
                 print(f"❌ Error starting bot for {sym}: {e}")
 
-        print(f"\n🚀 All {len(threads)} asset bots running with SQLite Memory & AI Learner.\n")
-        return threads
+        active_threads = [t for t in _active_bot_threads.values() if t.is_alive()]
+        if started_new:
+            print(f"\n🚀 {len(active_threads)} asset bots actively scanning with SQLite Memory & AI Learner.\n")
+            # Send Telegram launch announcement
+            asset_summary = ", ".join([f"{ASSET_CONFIG[s]['emoji']} {s.split('/')[0]}" for s in _active_bot_threads if _active_bot_threads[s].is_alive()])
+            send_telegram(
+                f"🚀 <b>EveryCryptoBot Live on Render</b>\n\n"
+                f"⚡ <b>Engine:</b> Autonomous Multi-Asset Trading System\n"
+                f"📊 <b>Active Bots ({len(active_threads)}):</b> {asset_summary}\n"
+                f"🎯 <b>Target:</b> +$50.00 Profit ($100 Paper Starting Capital)\n"
+                f"🧠 <b>AI Learner:</b> Walk-Forward Classifier Active\n"
+                f"🌐 <b>Dashboard:</b> https://everycryptobot.onrender.com\n\n"
+                f"Market scanning loops initialized. Signals and executions will broadcast in real-time."
+            )
+
+        return active_threads
+
 
 
 def main():
