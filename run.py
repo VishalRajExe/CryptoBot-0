@@ -61,8 +61,12 @@ def main():
 
     # Start bot engines in the same process (saves ~250MB RAM on Render 512MB free tier)
     target_sym = "BTC/USD" if args.one_bot else args.symbol
-    from multi_bot import start_all_bots
-    start_all_bots(symbol=target_sym)
+    try:
+        from multi_bot import start_all_bots
+        start_all_bots(symbol=target_sym)
+    except Exception as e:
+        print(f"❌ Error starting bot supervisor from run.py: {e}")
+
 
     try:
         while True:

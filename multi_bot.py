@@ -16,6 +16,8 @@ Key Architecture Features:
    - Triggers automated cooling periods and scales position sizes dynamically.
 """
 
+from __future__ import annotations
+
 import argparse
 import html
 import json
@@ -25,7 +27,8 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Tuple, Dict, Any, List
+
 
 if sys.platform == "win32":
     try:

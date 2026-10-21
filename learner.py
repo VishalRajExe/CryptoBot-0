@@ -32,6 +32,9 @@ if sys.platform == "win32":
 
 import numpy as np
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
 try:
     import joblib
     from sklearn.ensemble import RandomForestClassifier
@@ -40,6 +43,7 @@ try:
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
+
 
 log = logging.getLogger("ECB.Learner")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
