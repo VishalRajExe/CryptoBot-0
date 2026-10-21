@@ -30,14 +30,20 @@ def start_dashboard(auto_open: bool):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-browser", action="store_true", help="Don't auto-open the browser")
+    parser.add_argument("--one-bot", action="store_true", help="Run ONE bot (BTC/USD 1m Turbo Scalper with $50 goal)")
     parser.add_argument("--symbol", default=None, help="Only run one asset bot (e.g. SOL/USD)")
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  EveryCryptoBot — Multi-Asset Paper Trading System")
+    print("  EveryCryptoBot — Autonomous Paper Trading System")
     print("=" * 60)
-    print("  📊  BTC bot     : Running separately (alpaca_btc_bot.py)")
-    print("  🚀  Alt bots    : ETH / SOL / DOGE / LINK / AAVE / AVAX")
+    if args.one_bot:
+        print("  ⚡  Mode        : ONE BOT (BTC/USD 1m Turbo Scalper)")
+        print("  🎯  Goal        : +$50.00 Profit in 2 Hours ($100 Starting Wallet)")
+        print("  💰  Stake       : 90% Capital Allocation (~$90.00 per trade)")
+    else:
+        print("  📊  BTC bot     : alpaca_btc_bot.py")
+        print("  🚀  Alt bots    : ETH / SOL / DOGE / LINK / AAVE / AVAX")
     print("  🌐  Dashboard   : http://localhost:8765")
     print("  📱  Telegram    : @UnboundCycle12Bot")
     print("=" * 60 + "\n")
@@ -52,12 +58,14 @@ def main():
     dash_thread.start()
     time.sleep(1)
 
-    # Start multi_bot
-    cmd = [sys.executable, os.path.join(BASE, "multi_bot.py")]
-    if args.symbol:
-        cmd += ["--symbol", args.symbol]
+    if args.one_bot:
+        cmd = [sys.executable, os.path.join(BASE, "alpaca_btc_bot.py")]
+    else:
+        cmd = [sys.executable, os.path.join(BASE, "multi_bot.py")]
+        if args.symbol:
+            cmd += ["--symbol", args.symbol]
 
-    print(f"🚀  Launching multi_bot: {' '.join(cmd)}\n")
+    print(f"🚀  Launching: {' '.join(cmd)}\n")
     try:
         subprocess.run(cmd)
     except KeyboardInterrupt:

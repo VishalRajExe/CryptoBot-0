@@ -46,11 +46,14 @@ from alpaca.trading.requests import MarketOrderRequest
 
 from dotenv import load_dotenv
 
-# Load local environment variables
 load_dotenv()
-_alt_env = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-if os.path.exists(_alt_env):
-    load_dotenv(_alt_env)
+for env_path in [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "EveryCryptoBot", ".env"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "EveryCryptoBot", ".env"),
+]:
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION
@@ -60,34 +63,36 @@ API_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
 PAPER      = os.getenv("ALPACA_PAPER", "true").lower() == "true"
 
 SYMBOL        = "BTC/USD"                              # Alpaca crypto symbol
-TIMEFRAME     = TimeFrame(5, TimeFrameUnit.Minute)     # 5-minute candles (active intraday signals)
-POLL_SECS     = 60               # Check every 60 seconds
-CANDLE_LIMIT  = 250              # Bars for indicator calculations
+TIMEFRAME     = TimeFrame(1, TimeFrameUnit.Minute)     # 1-minute turbo scalping candles
+POLL_SECS     = 20               # Check every 20 seconds for fast reactive trading
+CANDLE_LIMIT  = 200              # Bars for indicator calculations
 
-# ── Triple Confluence Strategy Parameters ────
+# ── Turbo 1-Minute Confluence Parameters ────
 RSI_PERIOD       = 14
-RSI_BUY_MIN      = 50     # RSI must be above 50 (bullish control) to buy
-RSI_BUY_MAX      = 70     # RSI must be below 70 (not yet exhausted) to buy
-RSI_SELL_MIN     = 30     # RSI must be above 30 (not yet oversold) to sell
-RSI_SELL_MAX     = 50     # RSI must be below 50 (bearish control) to sell
-EMA_FAST         = 50     # Fast EMA — short-term trend
-EMA_SLOW         = 200    # Slow EMA — long-term trend (golden/death cross)
-MACD_FAST        = 12     # MACD fast period
-MACD_SLOW        = 26     # MACD slow period
-MACD_SIGNAL      = 9      # MACD signal smoothing
+RSI_BUY_MIN      = 40     # Bullish expansion threshold
+RSI_BUY_MAX      = 75     # Upper momentum boundary (not exhausted)
+RSI_SELL_MIN     = 25     # Bearish threshold
+RSI_SELL_MAX     = 60     # Lower boundary
+EMA_MICRO        = 9      # Fast micro trend
+EMA_FAST         = 21     # Intraday momentum baseline
+EMA_SLOW         = 50     # Session trend filter
+MACD_FAST        = 8      # Fast 1m MACD
+MACD_SLOW        = 21     # Slow 1m MACD
+MACD_SIGNAL      = 5      # Signal line smoothing
 ATR_PERIOD       = 14     # ATR for dynamic stop-loss
-ATR_SL_MULT      = 1.5    # Stop-loss = 1.5x ATR below entry
-RR_RATIO         = 2.0    # Take-profit = 2x the risk (1:2 Risk:Reward)
-MIN_CANDLES      = 210    # Needs 210+ bars for EMA200 to be valid
+ATR_SL_MULT      = 1.0    # Stop-loss = 1.0x ATR below entry
+RR_RATIO         = 1.75   # Take-profit = 1.75x ATR
+MIN_CANDLES      = 55     # Valid after 55 1-min bars
 
-# ── Risk Management ──────────────────────────
-# Dynamic position sizing: Optimized for $100 starting balance up to full scale
+# ── Dynamic Risk & $50 Profit Target ─────────
+TARGET_PROFIT_GOAL = 50.0  # $50 target profit in 2 hours
+STARTING_WALLET    = 100.0 # Starting capital
 DYNAMIC_SIZING   = os.getenv("DYNAMIC_SIZING", "true").lower() == "true"
-STATIC_STAKE_USD = float(os.getenv("BTC_STAKE_USD", "0.0"))  # 0.0 activates dynamic compounding
-RISK_FRACTION    = float(os.getenv("BTC_RISK_FRACTION", "0.25")) # 25% allocation of available cash
+STATIC_STAKE_USD = float(os.getenv("BTC_STAKE_USD", "0.0"))
+RISK_FRACTION    = float(os.getenv("BTC_RISK_FRACTION", "0.90")) # 90% allocation of available cash (~$90 stake)
 MIN_STAKE_USD    = 10.0    # Minimum order size ($10 safe threshold)
-STAKE_USD        = 5000.0  # Fallback ceiling
-MAX_OPEN_TRADES  = 1       # Only 1 BTC position at a time
+STAKE_USD        = 90.0    # Fallback ceiling
+MAX_OPEN_TRADES  = 1       # Focus on 1 active trade at a time
 
 # ── Telegram Notifications ────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -182,11 +187,13 @@ def compute_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # ── Trend Filter: EMA 50 / 200 ───────────
-    df["ema50"]  = compute_ema(df["close"], EMA_FAST)
-    df["ema200"] = compute_ema(df["close"], EMA_SLOW)
+    # ── Trend Filters: Fast Micro EMA9, EMA21, EMA50 ───────────
+    df["ema9"]   = compute_ema(df["close"], EMA_MICRO)
+    df["ema21"]  = compute_ema(df["close"], EMA_FAST)
+    df["ema50"]  = compute_ema(df["close"], EMA_SLOW)
+    df["ema200"] = compute_ema(df["close"], 200)
 
-    # ── Momentum Trigger: MACD 12/26/9 ───────
+    # ── Momentum Trigger: Fast MACD 8/21/5 ───────
     df["macd"], df["macd_signal"], df["macd_hist"] = compute_macd(
         df["close"], MACD_FAST, MACD_SLOW, MACD_SIGNAL
     )
@@ -209,39 +216,29 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 def get_signal(df: pd.DataFrame) -> tuple[str, float, float]:
     """
-    Triple Confluence Signal Generator.
-    Returns: (signal, stop_loss_price, take_profit_price)
-
-    BUY  when ALL 3 conditions are true:
-      1. TREND  : price > EMA50 > EMA200  (confirmed uptrend)
-      2. MOMENTUM: MACD line just crossed ABOVE signal line
-      3. RSI FILTER: RSI between 50-70 (bullish momentum, not exhausted)
-
-    SELL when ALL 3 conditions are true:
-      1. TREND  : price < EMA50 < EMA200  (confirmed downtrend)
-      2. MOMENTUM: MACD line just crossed BELOW signal line
-      3. RSI FILTER: RSI between 30-50 (bearish momentum, not oversold)
-
-    SL  = entry - (ATR_SL_MULT × ATR)  — dynamic, adapts to volatility
-    TP  = entry + (RR_RATIO × risk)     — 1:2 risk/reward minimum
+    Turbo 1-Minute Confluence & Scalp Momentum Engine.
+    Engineered for high-frequency paper scalping to capture quick waves.
     """
     if len(df) < MIN_CANDLES:
         return "HOLD", 0.0, 0.0
 
     last  = df.iloc[-1]
+    prev  = df.iloc[-2]
     price = last["close"]
-    atr   = last["atr"]
-    risk  = atr * ATR_SL_MULT  # dollar risk per BTC
+    atr   = last["atr"] if pd.notna(last["atr"]) and last["atr"] > 0 else (price * 0.002)
+    risk  = atr * ATR_SL_MULT
 
-    # ── BUY Conditions (all 3 must be true) ──
-    trend_up     = price > last["ema50"] and last["ema50"] > last["ema200"]
-    macd_bull    = bool(last["macd_cross_up"])
-    rsi_bull     = RSI_BUY_MIN <= last["rsi"] <= RSI_BUY_MAX
+    # 1. Trend Filter: Price above EMA21 and EMA9 >= EMA21 (or price > EMA50)
+    trend_up   = (price >= last["ema21"] and last["ema9"] >= last["ema21"]) or (price > last["ema50"] and last["ema9"] > last["ema21"])
+    trend_down = (price <= last["ema21"] and last["ema9"] <= last["ema21"]) or (price < last["ema50"] and last["ema9"] < last["ema21"])
 
-    # ── SELL Conditions (all 3 must be true) ─
-    trend_down   = price < last["ema50"] and last["ema50"] < last["ema200"]
-    macd_bear    = bool(last["macd_cross_down"])
-    rsi_bear     = RSI_SELL_MIN <= last["rsi"] <= RSI_SELL_MAX
+    # 2. Momentum Trigger: Positive expanding histogram or fresh crossover
+    macd_bull = (last["macd_hist"] > 0 and last["macd_hist"] >= prev["macd_hist"]) or bool(last["macd_cross_up"])
+    macd_bear = (last["macd_hist"] < 0 and last["macd_hist"] <= prev["macd_hist"]) or bool(last["macd_cross_down"])
+
+    # 3. RSI Filter: Bullish momentum without extreme exhaustion
+    rsi_bull = RSI_BUY_MIN <= last["rsi"] <= RSI_BUY_MAX
+    rsi_bear = RSI_SELL_MIN <= last["rsi"] <= RSI_SELL_MAX
 
     if trend_up and macd_bull and rsi_bull:
         sl = round(price - risk, 2)
@@ -249,7 +246,7 @@ def get_signal(df: pd.DataFrame) -> tuple[str, float, float]:
         return "BUY", sl, tp
 
     if trend_down and macd_bear and rsi_bear:
-        sl = round(price + risk, 2)         # for reference (no shorting on spot)
+        sl = round(price + risk, 2)
         tp = round(price - risk * RR_RATIO, 2)
         return "SELL", sl, tp
 
@@ -510,13 +507,37 @@ class AlpacaBTCBot:
             return False
 
     # ── Stop-Loss / Take-Profit Check ────────
-    def check_exit_conditions(self, price: float) -> bool:
+    def check_exit_conditions(self, price: float, atr: float = 0.0) -> bool:
         pos = self.state.get("position")
         if not pos:
             return False
 
         sl = pos.get("stop_loss", 0)
         tp = pos.get("take_profit", float("inf"))
+        entry = pos.get("entry_price", price)
+        highest_price = pos.get("highest_price", entry)
+
+        # Dynamic Trailing Stop & Breakeven Lock-in
+        if price > highest_price:
+            pos["highest_price"] = price
+            highest_price = price
+            gain_pct = (price - entry) / entry
+            # Breakeven lock-in: if gain >= 0.35%, lock in entry + 0.05%
+            if gain_pct >= 0.0035:
+                be_sl = round(entry * 1.0005, 2)
+                if be_sl > sl:
+                    pos["stop_loss"] = be_sl
+                    sl = be_sl
+                    log.info("🎯 BREAKEVEN PROTECTOR: Stop Loss adjusted to $%.2f (Locked in profit!)", sl)
+
+            # Dynamic Trailing Stop: if gain >= 0.7% and ATR available, trail peak
+            if gain_pct >= 0.007 and atr > 0:
+                trail_sl = round(highest_price - (atr * 0.75), 2)
+                if trail_sl > sl:
+                    pos["stop_loss"] = trail_sl
+                    sl = trail_sl
+                    log.info("🚀 TRAILING STOP: Adjusted to $%.2f to ride winning trend!", sl)
+            save_state(self.state)
 
         if price <= sl:
             log.warning("STOP-LOSS triggered @ $%.2f (SL=$%.2f)", price, sl)
@@ -549,21 +570,19 @@ class AlpacaBTCBot:
             signal_detail = "SELL [exit position]"
 
         log.info(
-            "--- MARKET SNAPSHOT ---\n"
+            "--- MARKET SNAPSHOT (1m Turbo) ---\n"
             "  Price    : $%.2f  |  Signal : %s\n"
             "  RSI(%d)  : %.2f   |  MACD: %.2f  Signal: %.2f  Hist: %.2f\n"
-            "  EMA50    : $%.2f  |  EMA200 : $%.2f  |  Trend: %s\n"
+            "  EMA9     : $%.2f  |  EMA21  : $%.2f  |  EMA50  : $%.2f\n"
             "  ATR(%d)  : $%.2f  |  Position: %s\n"
-            "  Total PnL: $%.4f  |  Trades: %d",
+            "  Session PnL: $%.4f / +$%.2f Target  |  Trades: %d",
             price, signal_detail,
             RSI_PERIOD, last["rsi"],
             last["macd"], last["macd_signal"], last["macd_hist"],
-            last["ema50"], last["ema200"],
-            "UPTREND" if price > last["ema50"] > last["ema200"] else
-            "DOWNTREND" if price < last["ema50"] < last["ema200"] else "NEUTRAL",
+            last.get("ema9", 0.0), last.get("ema21", 0.0), last.get("ema50", 0.0),
             ATR_PERIOD, last["atr"],
             pos_str,
-            self.state.get("total_pnl", 0.0),
+            self.state.get("total_pnl", 0.0), TARGET_PROFIT_GOAL,
             len(self.state.get("trades", [])),
         )
 
@@ -571,15 +590,29 @@ class AlpacaBTCBot:
     def notify_startup(self):
         trades_count = len(self.state.get("trades", []))
         total_pnl = self.state.get("total_pnl", 0.0)
+        try:
+            acct = self.trading.get_account()
+            cash_val = float(acct.cash)
+            equity_val = float(acct.equity)
+        except Exception:
+            cash_val = 100.0
+            equity_val = 100.0
+
         msg = (
-            "🤖 <b>ALPACA TRADING BOT ONLINE</b>\n"
+            "🚀 <b>ALPACA 1M TURBO SCALPER ONLINE</b> 🚀\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💰 <b>Asset:</b> {SYMBOL} (Paper Trading)\n"
-            f"📈 <b>Strategy:</b> Triple Confluence (EMA{EMA_FAST}/{EMA_SLOW} + MACD + RSI{RSI_PERIOD})\n"
-            f"💵 <b>Stake:</b> ${self.calculate_stake():,.2f} (Dynamic Compounding: {int(RISK_FRACTION*100)}% Equity)\n"
-            f"⏱️ <b>Timeframe:</b> 5-min candles | Poll: {POLL_SECS}s\n"
-            f"💼 <b>Total Realized PnL:</b> ${total_pnl:,.4f} ({trades_count} trades)\n"
+            f"💰 <b>Trading Asset:</b> {SYMBOL} (Paper Trading)\n"
+            f"📈 <b>Strategy:</b> Turbo 1m Momentum Scalper (EMA9/21/50 + MACD8/21/5 + RSI14)\n"
+            f"💵 <b>Allocated Stake:</b> ${self.calculate_stake():,.2f} ({int(RISK_FRACTION*100)}% High-Velocity Allocation)\n"
+            f"⏱️ <b>Timeframe:</b> 1-min candles | Poll: {POLL_SECS}s\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 <b>SESSION TARGET:</b>\n"
+            f"  • <b>Profit Goal:</b> <b>+$50.00 in 2 Hours</b>\n"
+            f"  • <b>Starting Wallet:</b> <b>$100.00</b> → <b>Target Equity: $150.00</b>\n"
+            f"  • <b>Current Equity:</b> ${equity_val:,.2f} | <b>Cash:</b> ${cash_val:,.2f}\n"
+            f"  • <b>Realized Profits:</b> ${total_pnl:,.4f}\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "🌐 <b>Live Dashboard:</b> http://localhost:8765\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
         )
         send_telegram(msg)
@@ -587,17 +620,22 @@ class AlpacaBTCBot:
     def notify_buy(self, qty: float, price: float, sl: float, tp: float):
         risk = price - sl if sl else 0.0
         reward = tp - price if tp else 0.0
+        total_pnl = self.state.get("total_pnl", 0.0)
+        progress_pct = max(0.0, min(100.0, (total_pnl / TARGET_PROFIT_GOAL) * 100))
+
         msg = (
             "🟢 <b>BUY ORDER EXECUTED</b> 🟢\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"💰 <b>Asset:</b> {SYMBOL}\n"
-            f"📊 <b>Action:</b> BUY MARKET\n"
+            f"📊 <b>Action:</b> BUY MARKET (High-Velocity Scalp)\n"
             f"🔢 <b>Quantity:</b> <code>{qty:.6f} BTC</code> (~${qty * price:,.2f})\n"
             f"💵 <b>Entry Price:</b> <b>${price:,.2f}</b>\n"
             f"🛑 <b>Stop Loss:</b> ${sl:,.2f} (-${risk:,.2f})\n"
             f"🎯 <b>Take Profit:</b> ${tp:,.2f} (+${reward:,.2f})\n"
             f"⚖️ <b>Risk:Reward:</b> 1:{RR_RATIO:.1f}\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 <b>$50 GOAL PROGRESS:</b>\n"
+            f"  • <b>Current Earned:</b> <b>{'+' if total_pnl >= 0 else ''}${total_pnl:,.4f}</b> / <b>+$50.00</b> ({progress_pct:.1f}%)\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
         )
         send_telegram(msg)
@@ -614,7 +652,14 @@ class AlpacaBTCBot:
 
         outcome = "WIN ✅" if is_win else "LOSS ❌"
         total_pnl = self.state.get("total_pnl", 0.0)
+        progress_pct = max(0.0, min(100.0, (total_pnl / TARGET_PROFIT_GOAL) * 100))
         trades_count = len(self.state.get("trades", []))
+
+        try:
+            acct = self.trading.get_account()
+            equity_val = float(acct.equity)
+        except Exception:
+            equity_val = 100.0 + total_pnl
 
         msg = (
             f"{header}\n"
@@ -622,50 +667,68 @@ class AlpacaBTCBot:
             f"💰 <b>Asset:</b> {SYMBOL}\n"
             f"📊 <b>Exit Reason:</b> {reason.upper()}\n"
             f"🔢 <b>Quantity:</b> <code>{qty:.6f} BTC</code>\n"
-            f"💵 <b>Entry Price:</b> ${entry_price:,.2f}\n"
-            f"💵 <b>Exit Price:</b> <b>${price:,.2f}</b>\n"
+            f"💵 <b>Entry:</b> ${entry_price:,.2f} → <b>Exit:</b> ${price:,.2f}\n"
             f"📈 <b>Trade PnL:</b> <b>{'+' if pnl >= 0 else ''}${pnl:,.2f} ({pnl_pct:+.2f}%)</b> [{outcome}]\n"
-            f"💼 <b>Total Bot PnL:</b> ${total_pnl:,.4f} ({trades_count} trades)\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 <b>$50 GOAL PROGRESS:</b>\n"
+            f"  • <b>Total Realized Profit:</b> <b>{'+' if total_pnl >= 0 else ''}${total_pnl:,.4f}</b> / <b>+$50.00</b> ({progress_pct:.1f}%)\n"
+            f"  • <b>Current Equity:</b> <b>${equity_val:,.2f}</b> (Target: $150.00)\n"
+            f"  • <b>Completed Trades:</b> {trades_count}\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
         )
         send_telegram(msg)
 
     def notify_cycle(self, cycle: int, price: float, df: pd.DataFrame,
                      signal: str, sl: float = 0.0, tp: float = 0.0):
-        last = df.iloc[-1]
         pos = self.state.get("position")
-        trend = "UPTREND 📈" if price > last["ema50"] > last["ema200"] else \
-                "DOWNTREND 📉" if price < last["ema50"] < last["ema200"] else "NEUTRAL ⚖️"
+        # Keep channel clean: notify on cycle 1, every 5 cycles, or when position is open
+        if cycle != 1 and (cycle % 5 != 0) and not pos:
+            return
+
+        last = df.iloc[-1]
+        trend = "UPTREND 📈" if price > last.get("ema21", price) > last.get("ema50", price) else \
+                "DOWNTREND 📉" if price < last.get("ema21", price) < last.get("ema50", price) else "NEUTRAL ⚖️"
 
         if pos:
             unreal = (price - pos["entry_price"]) * pos["qty"]
             unreal_pct = ((price - pos["entry_price"]) / pos["entry_price"]) * 100
             pnl_emoji = "🟢" if unreal >= 0 else "🔴"
             pos_block = (
-                f"💼 <b>Position:</b> 🟢 LONG <code>{pos['qty']:.6f} BTC</code>\n"
-                f"💵 <b>Entry:</b> ${pos['entry_price']:,.2f} | <b>Now:</b> ${price:,.2f}\n"
+                f"💼 <b>Active Position:</b> 🟢 LONG <code>{pos['qty']:.6f} BTC</code>\n"
+                f"💵 <b>Entry:</b> ${pos['entry_price']:,.2f} | <b>Current:</b> ${price:,.2f}\n"
                 f"🛑 <b>SL:</b> ${pos['stop_loss']:,.2f} | 🎯 <b>TP:</b> ${pos['take_profit']:,.2f}\n"
                 f"📊 <b>Unrealized PnL:</b> {pnl_emoji} <b>{'+' if unreal >= 0 else ''}${unreal:,.2f} ({unreal_pct:+.2f}%)</b>"
             )
         else:
-            pos_block = "💼 <b>Position:</b> ⚪ FLAT (Waiting for confluence setup)"
+            pos_block = "💼 <b>Position:</b> ⚪ FLAT (Hunting for 1m momentum entry)"
 
         sig_icon = "🟢 BUY" if signal == "BUY" else "🔴 SELL" if signal == "SELL" else "🟡 HOLD"
         total_pnl = self.state.get("total_pnl", 0.0)
+        progress_pct = max(0.0, min(100.0, (total_pnl / TARGET_PROFIT_GOAL) * 100))
         trades_count = len(self.state.get("trades", []))
 
+        try:
+            acct = self.trading.get_account()
+            cash_val = float(acct.cash)
+            equity_val = float(acct.equity)
+        except Exception:
+            cash_val = 100.0
+            equity_val = 100.0 + total_pnl
+
         msg = (
-            f"🟡 <b>CYCLE #{cycle} REPORT</b>\n"
+            f"⚡ <b>CYCLE #{cycle} (1m Turbo Scalp)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💵 <b>BTC Price:</b> <b>${price:,.2f}</b>\n"
-            f"🧭 <b>Trend:</b> {trend} | <b>Signal:</b> {sig_icon}\n"
-            f"📊 <b>RSI(14):</b> {last['rsi']:.2f}\n"
-            f"🌊 <b>MACD:</b> {last['macd']:.2f} | <b>Signal:</b> {last['macd_signal']:.2f} (Hist: {last['macd_hist']:+.2f})\n"
-            f"📏 <b>EMA50:</b> ${last['ema50']:,.2f} | <b>EMA200:</b> ${last['ema200']:,.2f}\n"
+            f"💵 <b>BTC:</b> <b>${price:,.2f}</b> | <b>Signal:</b> {sig_icon}\n"
+            f"🧭 <b>Trend:</b> {trend} | <b>RSI:</b> {last['rsi']:.1f}\n"
+            f"🌊 <b>MACD Hist:</b> {last['macd_hist']:+.2f} | <b>ATR:</b> ${last['atr']:.2f}\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"{pos_block}\n"
-            f"🏆 <b>Total Realized PnL:</b> ${total_pnl:,.4f} ({trades_count} trades)\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 <b>$50 GOAL PROGRESS:</b>\n"
+            f"  • <b>Profits Earned:</b> <b>{'+' if total_pnl >= 0 else ''}${total_pnl:,.4f}</b> / <b>+$50.00</b> ({progress_pct:.1f}%)\n"
+            f"  • <b>Account Equity:</b> <b>${equity_val:,.2f}</b> (Target: $150.00)\n"
+            f"  • <b>Available Cash:</b> ${cash_val:,.2f} (Stake: ${self.calculate_stake():,.2f})\n"
+            f"  • <b>Completed Trades:</b> {trades_count}\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
         send_telegram(msg)
@@ -706,8 +769,9 @@ class AlpacaBTCBot:
                     pos["unrealized_pnl"] = round(unreal, 4)
                     save_state(self.state)
 
-                # 4. Check SL/TP first (always)
-                exited = self.check_exit_conditions(price)
+                # 4. Check SL/TP first (always with trailing stop & breakeven protector)
+                atr_val = float(df["atr"].iloc[-1]) if ("atr" in df and pd.notna(df["atr"].iloc[-1])) else 0.0
+                exited = self.check_exit_conditions(price, atr=atr_val)
 
                 # 5. Generate signal (returns tuple: signal, sl, tp)
                 signal, sl, tp = get_signal(df)
