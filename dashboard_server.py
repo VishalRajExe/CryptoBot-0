@@ -132,7 +132,22 @@ def get_backtest_summaries() -> list:
                 results.append(summary)
         except Exception:
             pass
-    return results
+_bots_started = False
+_bots_lock = threading.Lock()
+
+
+def ensure_bots_running():
+    global _bots_started
+    with _bots_lock:
+        if not _bots_started:
+            _bots_started = True
+            try:
+                from multi_bot import start_all_bots
+                t = threading.Thread(target=start_all_bots, daemon=True, name="BotSupervisor")
+                t.start()
+                print("🚀 Bot supervisor started in background thread.")
+            except Exception as e:
+                print(f"❌ Error starting bot supervisor: {e}")
 
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
@@ -169,6 +184,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         path = parsed.path
 
         if path in ("/health", "/api/health"):
+            ensure_bots_running()
             api_key = os.getenv("ALPACA_API_KEY", "")
             secret = os.getenv("ALPACA_SECRET_KEY", "")
             tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -183,6 +199,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 pos_count = 0
                 total_pnl = 0.0
 
+            active_threads = [t.name for t in threading.enumerate() if t.name.startswith("Bot-")]
+
             return self._send_json({
                 "status": "healthy",
                 "service": "EveryCryptoBot",
@@ -191,6 +209,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "telegram_configured": bool(tg_token and tg_chat),
                 "active_positions": pos_count,
                 "total_realized_pnl": total_pnl,
+                "bot_threads_running": len(active_threads),
+                "bot_threads": active_threads,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
 
@@ -306,24 +326,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 class ThreadingServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = True
-
-
-_bots_started = False
-_bots_lock = threading.Lock()
-
-
-def ensure_bots_running():
-    global _bots_started
-    with _bots_lock:
-        if not _bots_started:
-            _bots_started = True
-            try:
-                from multi_bot import start_all_bots
-                t = threading.Thread(target=start_all_bots, daemon=True, name="BotSupervisor")
-                t.start()
-                print("🚀 Bot supervisor started in background thread.")
-            except Exception as e:
-                print(f"❌ Error starting bot supervisor: {e}")
 
 
 def start_dashboard(auto_open: bool = True):
