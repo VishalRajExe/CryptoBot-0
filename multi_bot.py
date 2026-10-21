@@ -1,19 +1,19 @@
 """
-EveryCryptoBot – Multi-Asset Paper Trading Engine
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Runs multiple cryptos, each with their own strategy, in parallel threads.
-BTC/USD is handled by the separate alpaca_btc_bot.py – DO NOT TOUCH IT.
+EveryCryptoBot – Multi-Asset Autonomous Trading Engine with SQLite Memory & AI Learner
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Runs multiple cryptos in parallel threads with individual quantitative strategies.
+BTC/USD is managed separately by alpaca_btc_bot.py.
 
-Assets & Strategies:
-  ETH/USD   → MomentumEmaRibbon (5-min)  – Trend following & EMA ribbon
-  SOL/USD   → ScalpMacdRsi      (1-min)  – Fast momentum scalping
-  DOGE/USD  → ScalpMacdRsi      (1-min)  – Volatility breakout scalping
-  LINK/USD  → VwapBreakout      (15-min) – Anchored VWAP institutional breakout
-  AVAX/USD  → MomentumEmaRibbon (5-min)  – Intraday trend expansion
-
-Usage:
-  python multi_bot.py                    # run all 5 assets in parallel
-  python multi_bot.py --symbol SOL/USD   # run single asset
+Key Architecture Features:
+1. SQLite Trade Memory (trading_memory.db with WAL mode):
+   - ACID-compliant persistence surviving system restarts and crashes.
+   - Ground-truth Alpaca reconciliation on boot: instantly recovers open positions.
+2. Machine Learning Trade Learner (scikit-learn):
+   - Pre-trained on historical backtests and live trading telemetry.
+   - Predicts win probability on candidate signals; vetoes high-risk setups.
+3. Adaptive Risk & Circuit Breaker:
+   - Tracks consecutive losses per asset.
+   - Triggers automated cooling periods and scales position sizes dynamically.
 """
 
 import argparse
@@ -43,7 +43,9 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 
-from strategies import ScalpMacdRsi, MomentumEmaRibbon, VwapBreakout
+from learner import TradeLearner
+from memory import TradeMemory
+from strategies import MomentumEmaRibbon, ScalpMacdRsi, VwapBreakout
 
 load_dotenv()
 
@@ -58,7 +60,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_ENABLED   = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
 
-STAKE_USD = float(os.getenv("STAKE_USD_ALT", "300.0"))   # per alt-coin trade
+BASE_STAKE_USD = float(os.getenv("STAKE_USD_ALT", "300.0"))   # baseline stake per trade
 
 # Asset → Strategy mapping
 ASSET_CONFIG = {
@@ -110,7 +112,6 @@ TF_MAP = {
 # ─────────────────────────────────────────────────────────────────────────────
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
-
 _log_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
@@ -166,37 +167,12 @@ def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  PERSISTENT STATE
+#  SHARED MEMORY & LIVE STATE
 # ─────────────────────────────────────────────────────────────────────────────
+memory = TradeMemory()
+learner = TradeLearner()
+
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "multi_state.json")
-_state_lock = threading.Lock()
-
-
-def load_state() -> dict:
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-
-def get_asset_state(state: dict, symbol: str) -> dict:
-    if symbol not in state:
-        state[symbol] = {"position": None, "trades": [], "total_pnl": 0.0}
-    return state[symbol]
-
-
-def save_state(state: dict) -> None:
-    with _state_lock:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  DASHBOARD LIVE STATE
-# ─────────────────────────────────────────────────────────────────────────────
 DASHBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard", "live_state.json")
 _dashboard_state = {}
 _dash_lock = threading.Lock()
@@ -216,13 +192,11 @@ def update_dashboard(symbol: str, data: dict):
 #  ASSET BOT WORKER
 # ─────────────────────────────────────────────────────────────────────────────
 class AssetBot:
-    def __init__(self, symbol: str, config: dict, global_state: dict):
+    def __init__(self, symbol: str, config: dict):
         self.symbol  = symbol
         self.config  = config
         self.emoji   = config["emoji"]
         self.log     = _make_logger(symbol)
-        self.state   = global_state
-        self.a_state = get_asset_state(global_state, symbol)
 
         self.strategy = config["strategy"](symbol=symbol)
         self.tf_min   = config["timeframe_minutes"]
@@ -232,9 +206,22 @@ class AssetBot:
 
         self.trading  = TradingClient(API_KEY, API_SECRET, paper=PAPER)
         self.data_cl  = CryptoHistoricalDataClient(API_KEY, API_SECRET)
+        self.memory   = memory
+        self.learner  = learner
 
-        self.log.info("Initialized Strategy=%s TF=%dm Poll=%ds Stake=$%.2f",
-                      self.strategy.NAME, self.tf_min, self.poll, STAKE_USD)
+        # Reconcile open positions with Alpaca ground-truth on startup
+        self.reconcile_position()
+
+        self.log.info("Initialized Strategy=%s TF=%dm Poll=%ds BaseStake=$%.2f",
+                      self.strategy.NAME, self.tf_min, self.poll, BASE_STAKE_USD)
+
+    def reconcile_position(self) -> Optional[dict]:
+        """Adopts any active position from Alpaca directly into memory on boot."""
+        pos = self.memory.reconcile_with_alpaca(self.trading, self.symbol)
+        if pos:
+            self.log.info("🎯 ADOPTED EXISTING POSITION: Qty=%.6f @ $%.4f (SL=$%.4f TP=$%.4f)",
+                          pos["qty"], pos["entry_price"], pos["stop_loss"], pos["take_profit"])
+        return pos
 
     # ── Market Data ──────────────────────────────────────────────────────────
     def fetch_bars(self) -> Optional[pd.DataFrame]:
@@ -280,98 +267,115 @@ class AssetBot:
             return 0.0
 
     # ── Orders & Execution ───────────────────────────────────────────────────
-    def buy(self, price: float, sl: float, tp: float) -> bool:
-        qty = round(STAKE_USD / price, 6)
+    def buy(self, price: float, sl: float, tp: float, features: dict) -> bool:
+        # Check cooling period (mistake learning prevention)
+        if self.memory.is_in_cooldown(self.symbol):
+            self.log.warning("⏸️ COOL-DOWN ACTIVE: Skipping BUY on %s after consecutive losses.", self.symbol)
+            return False
+
+        # Apply adaptive risk sizing
+        risk_mult = self.memory.get_risk_multiplier(self.symbol)
+        active_stake = round(BASE_STAKE_USD * risk_mult, 2)
+
+        qty = round(active_stake / price, 6)
         if qty <= 0:
             return False
+
         cash = self.get_cash()
-        if cash < STAKE_USD:
-            self.log.warning("Insufficient cash $%.2f for stake $%.2f", cash, STAKE_USD)
+        if cash < active_stake:
+            self.log.warning("Insufficient cash $%.2f for active stake $%.2f", cash, active_stake)
             return False
+
         try:
             order = self.trading.submit_order(MarketOrderRequest(
                 symbol=self.symbol.replace("/", ""),
                 qty=qty, side=OrderSide.BUY,
                 time_in_force=TimeInForce.GTC,
             ))
-            entry = {
-                "order_id": str(order.id),
-                "entry_price": price,
-                "qty": qty,
-                "entry_time": datetime.now(timezone.utc).isoformat(),
-                "stop_loss": sl,
-                "take_profit": tp,
-            }
-            self.a_state["position"] = entry
-            save_state(self.state)
-            self.log.info("BUY %.6f %s @ $%.4f | SL=$%.4f TP=$%.4f",
-                          qty, self.symbol, price, sl, tp)
-            self._notify_buy(qty, price, sl, tp)
+            # Persist to SQLite Memory
+            self.memory.save_position(
+                symbol=self.symbol,
+                order_id=str(order.id),
+                qty=qty,
+                entry_price=price,
+                stop_loss=sl,
+                take_profit=tp,
+                strategy=self.strategy.NAME,
+                features=features
+            )
+            self.log.info("BUY %.6f %s @ $%.4f (Stake: $%.2f, RiskMult: %.2fx) | SL=$%.4f TP=$%.4f",
+                          qty, self.symbol, price, active_stake, risk_mult, sl, tp)
+            self._notify_buy(qty, price, sl, tp, active_stake, risk_mult)
             return True
         except Exception as e:
             self.log.error("BUY order failed: %s", e)
             return False
 
-    def sell(self, price: float, reason: str = "signal") -> bool:
+    def sell(self, price: float, reason: str = "signal", features: Optional[dict] = None) -> bool:
+        pos = self.memory.get_position(self.symbol)
         pos_qty = self.get_position_qty()
         if pos_qty <= 0:
-            self.a_state["position"] = None
-            save_state(self.state)
+            self.memory.remove_position(self.symbol)
             return False
+
         try:
             self.trading.submit_order(MarketOrderRequest(
                 symbol=self.symbol.replace("/", ""),
                 qty=pos_qty, side=OrderSide.SELL,
                 time_in_force=TimeInForce.GTC,
             ))
-            pos     = self.a_state.get("position", {})
-            ep      = pos.get("entry_price", price)
-            qty     = pos.get("qty", pos_qty)
-            pnl     = (price - ep) * qty
-            pnl_pct = ((price - ep) / ep) * 100 if ep else 0.0
+            ep = pos.get("entry_price", price) if pos else price
+            qty = pos.get("qty", pos_qty) if pos else pos_qty
+            entry_time = pos.get("entry_time", "") if pos else ""
+            in_features = json.loads(pos.get("features_json", "{}")) if pos and pos.get("features_json") else (features or {})
 
-            self.a_state["trades"].append({
-                "entry_price": ep,
-                "exit_price": price,
-                "qty": qty,
-                "pnl": round(pnl, 6),
-                "pnl_pct": round(pnl_pct, 3),
-                "reason": reason,
-                "exit_time": datetime.now(timezone.utc).isoformat(),
-            })
-            self.a_state["total_pnl"] = round(
-                self.a_state.get("total_pnl", 0.0) + pnl, 6)
-            self.a_state["position"] = None
-            save_state(self.state)
+            # Record in SQLite and update learning metrics
+            learning = self.memory.record_closed_trade(
+                symbol=self.symbol,
+                strategy=self.strategy.NAME,
+                qty=qty,
+                entry_price=ep,
+                exit_price=price,
+                entry_time=entry_time,
+                reason=reason,
+                features=in_features
+            )
 
-            self.log.info("SELL [%s] %.6f %s @ $%.4f | PnL $%.4f (%.2f%%) | %s",
-                          "WIN" if pnl >= 0 else "LOSS", qty, self.symbol,
-                          price, pnl, pnl_pct, reason)
-            self._notify_sell(qty, price, ep, pnl, pnl_pct, reason)
+            # Update ML model online sample
+            self.learner.record_online_sample(in_features, learning["is_win"])
+
+            pnl = learning["pnl"]
+            pnl_pct = learning["pnl_pct"]
+            is_win = learning["is_win"]
+
+            self.log.info("SELL [%s] %.6f %s @ $%.4f | PnL $%.4f (%.2f%%) | %s | RiskMult=%.2fx",
+                          "WIN" if is_win else "LOSS", qty, self.symbol,
+                          price, pnl, pnl_pct, reason, learning["risk_multiplier"])
+            self._notify_sell(qty, price, ep, pnl, pnl_pct, reason, learning)
             return True
         except Exception as e:
             self.log.error("SELL order failed: %s", e)
             return False
 
-    def check_exit(self, price: float) -> bool:
-        pos = self.a_state.get("position")
+    def check_exit(self, price: float, features: dict) -> bool:
+        pos = self.memory.get_position(self.symbol)
         if not pos:
             return False
         sl  = pos.get("stop_loss", 0.0)
         tp  = pos.get("take_profit", float("inf"))
         if price <= sl:
             self.log.warning("STOP-LOSS hit @ $%.4f (SL=$%.4f)", price, sl)
-            self.sell(price, reason="stop_loss")
+            self.sell(price, reason="stop_loss", features=features)
             return True
         if price >= tp:
             self.log.info("TAKE-PROFIT hit @ $%.4f (TP=$%.4f)", price, tp)
-            self.sell(price, reason="take_profit")
+            self.sell(price, reason="take_profit", features=features)
             return True
         return False
 
     # ── Trading Loop ─────────────────────────────────────────────────────────
     def run(self):
-        self.log.info("Starting paper trade loop for %s", self.symbol)
+        self.log.info("Starting persistent trading loop for %s", self.symbol)
         self._notify_startup()
         cycle = 0
 
@@ -391,18 +395,10 @@ class AssetBot:
 
                 df      = self.strategy.add_indicators(df)
                 price   = self.get_price() or float(df["close"].iloc[-1])
-                exited  = self.check_exit(price)
-                result  = self.strategy.get_signal(df, price)
-                pos     = self.a_state.get("position")
 
-                # Unrealized PnL
-                unreal = 0.0
-                if pos:
-                    unreal = (price - pos["entry_price"]) * pos["qty"]
-
-                # Extract indicator snapshot
-                indicators = {}
+                # Extract indicator vector for AI learning
                 last = df.iloc[-1]
+                indicators = {}
                 for col in ["rsi", "macd", "macd_signal", "macd_hist", "ema200",
                             "ema55", "ema21", "ema13", "ema8", "vwap", "atr", "vol_ratio", "adx"]:
                     if col in df.columns:
@@ -410,11 +406,33 @@ class AssetBot:
                         if pd.notna(v):
                             indicators[col] = round(float(v), 4)
 
-                self.log.info("Price=$%.4f | Signal=%s | %s | PnL_Session=$%.4f",
-                              price, result.signal, result.reason,
-                              self.a_state.get("total_pnl", 0.0))
+                features = {
+                    "rsi": indicators.get("rsi", 50.0),
+                    "macd_hist": indicators.get("macd_hist", 0.0),
+                    "atr": indicators.get("atr", 1.0),
+                    "price": price,
+                    "vol_ratio": indicators.get("vol_ratio", 1.0)
+                }
 
-                # Update live dashboard state
+                # Check Stop-loss / Take-profit exits
+                exited  = self.check_exit(price, features)
+                result  = self.strategy.get_signal(df, price)
+                pos     = self.memory.get_position(self.symbol)
+
+                # Unrealized PnL calculation
+                unreal = 0.0
+                if pos:
+                    unreal = (price - pos["entry_price"]) * pos["qty"]
+
+                # AI Learner Evaluation
+                ai_approved, win_prob, ai_reason = self.learner.evaluate_signal(self.symbol, features)
+                cooling_active = self.memory.is_in_cooldown(self.symbol)
+                risk_mult = self.memory.get_risk_multiplier(self.symbol)
+
+                self.log.info("Price=$%.4f | Signal=%s | AI: %.0f%% win prob | PnL_Unreal=$%.2f | RiskMult=%.2fx",
+                              price, result.signal, win_prob * 100, unreal, risk_mult)
+
+                # Push real-time state to Dashboard
                 update_dashboard(self.symbol, {
                     "symbol": self.symbol,
                     "strategy": self.strategy.NAME,
@@ -427,21 +445,29 @@ class AssetBot:
                     "indicators": indicators,
                     "position": pos,
                     "unrealized_pnl": round(unreal, 4),
-                    "total_pnl": self.a_state.get("total_pnl", 0.0),
-                    "trades_count": len(self.a_state.get("trades", [])),
+                    "ai_approved": ai_approved,
+                    "ai_prob": round(win_prob, 2),
+                    "ai_reason": ai_reason,
+                    "cooling_active": cooling_active,
+                    "risk_multiplier": risk_mult,
                     "cycle": cycle,
                 })
 
-                # Telegram cycle notification
-                self._notify_cycle(cycle, price, result, pos, unreal)
+                # Telegram cycle update
+                self._notify_cycle(cycle, price, result, pos, unreal, win_prob, risk_mult)
 
-                # Order Execution
+                # Order Execution Logic with AI Safeguards
                 if not exited:
                     has_pos = pos is not None
                     if result.signal == "BUY" and not has_pos:
-                        self.buy(price, result.stop_loss, result.take_profit)
+                        if not ai_approved:
+                            self.log.warning("🚫 AI LEARNER VETOED BUY: %s", ai_reason)
+                        elif cooling_active:
+                            self.log.warning("⏸️ COOLING CIRCUIT BREAKER ACTIVE: Skipping trade.")
+                        else:
+                            self.buy(price, result.stop_loss, result.take_profit, features)
                     elif result.signal == "SELL" and has_pos:
-                        self.sell(price, reason="sell_signal")
+                        self.sell(price, reason="sell_signal", features=features)
                     elif result.signal == "BUY" and has_pos:
                         self.log.info("BUY signal confirmed – holding active position.")
                     elif result.signal == "SELL" and not has_pos:
@@ -456,42 +482,42 @@ class AssetBot:
 
     # ── Telegram Notifications ───────────────────────────────────────────────
     def _notify_startup(self):
-        total = self.a_state.get("total_pnl", 0.0)
-        tc    = len(self.a_state.get("trades", []))
+        risk_mult = self.memory.get_risk_multiplier(self.symbol)
         send_telegram(
-            f"{self.emoji} <b>{self.symbol} Bot ONLINE</b>\n"
+            f"{self.emoji} <b>{self.symbol} Bot ONLINE (Persistent)</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"📈 <b>Strategy:</b> {html.escape(self.strategy.NAME)}\n"
             f"⏱️ <b>Timeframe:</b> {self.tf_min}-min | Poll: {self.poll}s\n"
-            f"💵 <b>Stake:</b> ${STAKE_USD:,.2f} per trade\n"
-            f"💼 <b>Session PnL:</b> ${total:,.4f} ({tc} trades)\n"
+            f"🧠 <b>Memory:</b> SQLite WAL Mode Active\n"
+            f"🎯 <b>Adaptive Risk:</b> {risk_mult:.2f}x (${BASE_STAKE_USD * risk_mult:,.2f})\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>"
         )
 
-    def _notify_buy(self, qty: float, price: float, sl: float, tp: float):
+    def _notify_buy(self, qty: float, price: float, sl: float, tp: float, stake: float, risk_mult: float):
         risk   = price - sl
         reward = tp - price
         send_telegram(
             f"{self.emoji} 🟢 <b>BUY ORDER FILLED — {self.symbol}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 <b>Strategy:</b> {html.escape(self.strategy.NAME)}\n"
-            f"🔢 <b>Qty:</b> <code>{qty:.6f}</code> (~${qty*price:,.2f})\n"
+            f"🔢 <b>Qty:</b> <code>{qty:.6f}</code> (~${stake:,.2f} | {risk_mult:.2f}x stake)\n"
             f"💵 <b>Entry Price:</b> <b>${price:,.4f}</b>\n"
             f"🛑 <b>Stop Loss:</b> ${sl:,.4f} (-${risk:,.2f})\n"
             f"🎯 <b>Take Profit:</b> ${tp:,.4f} (+${reward:,.2f})\n"
+            f"🧠 <b>Memory:</b> Synced with SQLite & Alpaca\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
     def _notify_sell(self, qty: float, price: float, ep: float,
-                     pnl: float, pnl_pct: float, reason: str):
-        total = self.a_state.get("total_pnl", 0.0)
-        tc    = len(self.a_state.get("trades", []))
-        hdr   = {
+                     pnl: float, pnl_pct: float, reason: str, learning: dict):
+        hdr = {
             "take_profit": f"🎯 <b>TAKE PROFIT HIT — {self.symbol}</b> 🟢",
             "stop_loss":   f"🛑 <b>STOP LOSS HIT — {self.symbol}</b> ⚠️",
         }.get(reason, f"🔴 <b>SELL EXECUTED — {self.symbol}</b>")
+
+        cool_line = f"\n⏸️ <b>Cool-down Activated:</b> 20 mins" if learning.get("cooldown_until") else ""
         send_telegram(
             f"{hdr}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -500,28 +526,26 @@ class AssetBot:
             f"💵 <b>Entry / Exit:</b> ${ep:,.4f} → ${price:,.4f}\n"
             f"📈 <b>Trade PnL:</b> <b>{'+'if pnl>=0 else ''}${pnl:,.4f} ({pnl_pct:+.2f}%)</b> "
             f"{'✅ WIN' if pnl>=0 else '❌ LOSS'}\n"
-            f"💼 <b>Cumulative PnL:</b> ${total:,.4f} ({tc} trades)\n"
+            f"🧠 <b>AI Adaptation:</b> Consec Losses: {learning['consecutive_losses']} | Risk Mult: {learning['risk_multiplier']:.2f}x{cool_line}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
-    def _notify_cycle(self, cycle: int, price: float, result, pos, unreal: float):
+    def _notify_cycle(self, cycle: int, price: float, result, pos, unreal: float, win_prob: float, risk_mult: float):
         sig_icon = {"BUY": "🟢", "SELL": "🔴"}.get(result.signal, "🟡")
         pos_line = (
             f"💼 LONG <code>{pos['qty']:.6f}</code> @ ${pos['entry_price']:,.4f} | "
             f"Unreal: {'+'if unreal>=0 else ''}${unreal:,.2f}"
             if pos else "💼 FLAT"
         )
-        total = self.a_state.get("total_pnl", 0.0)
-        tc    = len(self.a_state.get("trades", []))
         send_telegram(
             f"{self.emoji} <b>CYCLE #{cycle} — {self.symbol}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"💵 <b>Price:</b> <b>${price:,.4f}</b> | {sig_icon} <b>{result.signal}</b>\n"
+            f"🧠 <b>AI Forecast:</b> {round(win_prob*100)}% Win Prob | Risk: {risk_mult:.2f}x\n"
             f"📊 <i>{html.escape(result.reason)}</i>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"{pos_line}\n"
-            f"🏆 <b>Session PnL:</b> ${total:,.4f} ({tc} trades)\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
@@ -536,35 +560,32 @@ def main():
     args = parser.parse_args()
 
     if not API_KEY or not API_SECRET:
-        print("❌ Missing Alpaca API credentials. Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env")
+        print("❌ Missing Alpaca API credentials in .env")
         sys.exit(1)
-
-    global_state = load_state()
 
     if args.symbol:
         if args.symbol not in ASSET_CONFIG:
             print(f"❌ Unknown symbol: {args.symbol}. Available: {list(ASSET_CONFIG.keys())}")
             sys.exit(1)
         cfg = ASSET_CONFIG[args.symbol]
-        bot = AssetBot(args.symbol, cfg, global_state)
+        bot = AssetBot(args.symbol, cfg)
         bot.run()
     else:
-        # Run all assets as separate daemon threads
         threads = []
         for sym, cfg in ASSET_CONFIG.items():
-            bot = AssetBot(sym, cfg, global_state)
+            bot = AssetBot(sym, cfg)
             t   = threading.Thread(target=bot.run, name=f"Bot-{sym}", daemon=True)
             t.start()
             threads.append(t)
-            print(f"✅ Started thread for {sym}  ({cfg['strategy'].NAME})")
-            time.sleep(2)  # stagger startup
+            print(f"✅ Started persistent thread for {sym}  ({cfg['strategy'].NAME})")
+            time.sleep(2)
 
-        print(f"\n🚀 All {len(threads)} asset bots running in parallel. Press Ctrl+C to stop.\n")
+        print(f"\n🚀 All {len(threads)} asset bots running with SQLite Memory & AI Learner. Ctrl+C to stop.\n")
         try:
             while True:
                 time.sleep(30)
         except KeyboardInterrupt:
-            print("\n🛑 Shutting down all bots...")
+            print("\n🛑 Shutting down bots...")
 
 
 if __name__ == "__main__":

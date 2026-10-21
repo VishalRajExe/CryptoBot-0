@@ -450,6 +450,37 @@
       </div>
     </div>
 
+    <!-- AI MEMORY & SELF-LEARNING ENGINE -->
+    <div class="section-header">
+      <div class="section-title">
+        <span>🧠</span> AI Trade Memory & Adaptive Self-Learning Engine
+      </div>
+      <div style="font-size:12px;color:var(--muted)">SQLite WAL Persistence • scikit-learn Win Probability Forecast • Circuit Breakers</div>
+    </div>
+
+    <div class="stats-grid" id="learningGrid">
+      <div class="stat-card" style="border-color:rgba(168,85,247,0.3)">
+        <div class="stat-card-title" style="color:var(--purple)">SQLite Memory Engine</div>
+        <div class="stat-card-val" style="font-size:18px;color:#c084fc">trading_memory.db</div>
+        <div class="stat-card-sub">WAL Mode • ACID Durable (Survives Reboots)</div>
+      </div>
+      <div class="stat-card" style="border-color:rgba(56,189,248,0.3)">
+        <div class="stat-card-title" style="color:var(--blue)">Ground-Truth Reconciliation</div>
+        <div class="stat-card-val" style="font-size:18px;color:var(--blue)">Alpaca Sync Active</div>
+        <div class="stat-card-sub">Adopts orphan positions on boot immediately</div>
+      </div>
+      <div class="stat-card" style="border-color:rgba(16,185,129,0.3)">
+        <div class="stat-card-title" style="color:var(--green)">AI Classifier</div>
+        <div class="stat-card-val" style="font-size:18px;color:var(--green)" id="aiModelLabel">RandomForest (571 samples)</div>
+        <div class="stat-card-sub">Pre-trained on historical setups & live trades</div>
+      </div>
+      <div class="stat-card" style="border-color:rgba(245,158,11,0.3)">
+        <div class="stat-card-title" style="color:var(--yellow)">Adaptive Risk & Circuit Breaker</div>
+        <div class="stat-card-val" style="font-size:18px;color:var(--yellow)" id="circuitBreakerStatus">All Symbols Healthy</div>
+        <div class="stat-card-sub">2-loss cooling circuit breaker & dynamic stake scaling</div>
+      </div>
+    </div>
+
     <!-- TERMINAL & LOG INSPECTOR (User Request: "we can select crypto and check its log") -->
     <div class="terminal-section">
       <div class="terminal-header">
@@ -794,6 +825,48 @@
             }).join("");
           }
         }
+
+        // AI Learning & SQLite Memory
+        try {
+          const lrnRes = await fetch(`/api/learning?t=${Date.now()}`);
+          if (lrnRes.ok) {
+            const lrn = await lrnRes.json();
+            if (lrn.ai_learner) {
+              document.getElementById("aiModelLabel").textContent =
+                `RandomForest (${lrn.ai_learner.sample_count} samples)`;
+            }
+            if (lrn.memory && lrn.memory.symbols) {
+              let hasCooling = false;
+              let multStr = [];
+              Object.entries(lrn.memory.symbols).forEach(([sym, s]) => {
+                if (s.cooling_active) hasCooling = true;
+                multStr.push(`${sym.split('/')[0]}: ${s.risk_multiplier}x`);
+              });
+              if (hasCooling) {
+                document.getElementById("circuitBreakerStatus").textContent = "Cooling Active";
+                document.getElementById("circuitBreakerStatus").style.color = "var(--red)";
+              } else if (multStr.length) {
+                document.getElementById("circuitBreakerStatus").textContent = multStr.slice(0, 3).join(" | ");
+              }
+            }
+            if (lrn.recent_trades && lrn.recent_trades.length > 0) {
+              document.getElementById("tradeHistoryBody").innerHTML = lrn.recent_trades.slice(0, 15).map(t => {
+                const win = t.pnl >= 0;
+                return `
+                  <tr>
+                    <td style="color:var(--muted)">${t.exit_time ? t.exit_time.substring(11, 19) + ' UTC' : '—'}</td>
+                    <td style="font-weight:700">${t.symbol}</td>
+                    <td>SELL</td>
+                    <td>$${parseFloat(t.entry_price).toFixed(4)}</td>
+                    <td>$${parseFloat(t.exit_price).toFixed(4)}</td>
+                    <td class="${win ? 'win-text' : 'loss-text'}">${t.pnl >= 0 ? '+' : ''}$${parseFloat(t.pnl).toFixed(4)}</td>
+                    <td class="${win ? 'win-text' : 'loss-text'}">${t.pnl_pct >= 0 ? '+' : ''}${parseFloat(t.pnl_pct).toFixed(2)}%</td>
+                    <td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3)">${t.exit_reason || 'signal'}</span></td>
+                  </tr>`;
+              }).join("");
+            }
+          }
+        } catch (_) {}
 
       } catch (err) {
         console.error("fetchState err:", err);

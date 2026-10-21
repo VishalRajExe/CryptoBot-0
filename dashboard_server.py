@@ -179,6 +179,26 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             data = get_logs_for_symbol(symbol, max_lines=lines)
             return self._send_json(data)
 
+        if path == "/api/learning":
+            try:
+                from memory import TradeMemory
+                from learner import TradeLearner
+                mem = TradeMemory()
+                lrn = TradeLearner()
+                data = {
+                    "memory": mem.get_learning_summary(),
+                    "recent_trades": mem.get_recent_trades(limit=20),
+                    "ai_learner": {
+                        "is_trained": lrn.is_trained,
+                        "sample_count": lrn.sample_count,
+                        "benchmark_win_rate": round(lrn.win_rate * 100, 1),
+                        "model": "RandomForestClassifier (50 trees, max_depth=4)"
+                    }
+                }
+                return self._send_json(data)
+            except Exception as e:
+                return self._send_json({"error": str(e)}, status=500)
+
         # Fallback to static files in dashboard/ directory
         super().do_GET()
 

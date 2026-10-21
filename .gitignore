@@ -21,6 +21,10 @@ logs/
 alpaca_state.json
 multi_state.json
 dashboard/live_state.json
+trading_memory.db
+*.db
+*.db-wal
+*.db-shm
 
 # IDE / OS files
 .vscode/

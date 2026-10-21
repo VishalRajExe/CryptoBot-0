@@ -19,6 +19,31 @@ EveryCryptoBot runs dedicated algorithmic strategies tailored to each asset's vo
 
 ---
 
+## 🧠 SQLite Trade Memory & Reboot Resilience
+
+EveryCryptoBot is equipped with an **ACID-compliant SQLite trade database** (`trading_memory.db`) using **WAL (Write-Ahead Logging)** mode:
+
+- **Reboot & Crash Survival**: Positions and trade telemetry persist across bot restarts, computer reboots, or network disconnects.
+- **Ground-Truth Alpaca Reconciliation**: When the bot boots up, it automatically queries Alpaca's API ground-truth. If an open position exists, it **immediately adopts and reconciles** it—preventing duplicate buying or orphaned positions.
+- **Detailed Trade Telemetry**: Stores full indicator states at entry (RSI, MACD, ATR, volume, confidence) alongside exit triggers and outcomes for retrospective analysis.
+
+---
+
+## 🤖 Adaptive Self-Learning & Circuit Breakers
+
+The bot features active feedback loops to learn from past trade mistakes:
+
+1. **Machine Learning Signal Forecasting (`learner.py`)**:
+   - Uses `scikit-learn` (RandomForest classifier) pre-trained on 570+ historical trade samples.
+   - Evaluates prospective BUY setups against past winning/losing indicator clusters.
+   - **AI Veto**: Vetoes or warns on setups where predicted win probability is below 40%.
+2. **Consecutive Loss Circuit Breaker**:
+   - If an asset experiences 2 consecutive losses, the bot triggers an automated **20-minute cool-down freeze** to avoid choppy regime traps.
+3. **Adaptive Stake Scaling**:
+   - Dynamically scales position sizing (0.5x to 1.2x) based on the asset's rolling win rate and recent performance.
+
+---
+
 ## 🖥️ Live Dashboard & Real-Time Log Viewer
 
 EveryCryptoBot features a dark-themed control center running at `http://localhost:8765`:
