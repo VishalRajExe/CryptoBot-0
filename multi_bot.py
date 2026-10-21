@@ -156,25 +156,37 @@ def _make_logger(symbol: str) -> logging.Logger:
 # ─────────────────────────────────────────────────────────────────────────────
 #  TELEGRAM
 # ─────────────────────────────────────────────────────────────────────────────
-def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
+def send_telegram_detailed(text: str, chat_id: Optional[str] = None) -> tuple[bool, dict]:
     enabled = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
-    if not enabled:
-        return False
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"") or "8766601647:AAGu0Q1MzS6fMTvW3OW7_0WZGiIxgYq748c"
+    primary_target = (chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip().strip("'\"") or "8842786135"
 
-    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip() or "8766601647:AAGu0Q1MzS6fMTvW3OW7_0WZGiIxgYq748c"
-    primary_target = (chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip() or "8842786135"
+    details = {
+        "enabled": enabled,
+        "token_prefix": (token[:6] + "...") if len(token) >= 6 else "SHORT",
+        "token_suffix": ("..." + token[-4:]) if len(token) >= 4 else "SHORT",
+        "token_length": len(token),
+        "primary_target": primary_target,
+        "attempts": []
+    }
+
+    if not enabled:
+        details["error"] = "TELEGRAM_ENABLED is false"
+        return False, details
 
     targets_to_try = [primary_target]
     if "8842786135" not in targets_to_try:
         targets_to_try.append("8842786135")
 
     for target in targets_to_try:
+        target_clean = str(target).strip().strip("'\"")
+        attempt_info = {"target": target_clean}
         try:
             import urllib.parse
             import urllib.request
             url = f"https://api.telegram.org/bot{token}/sendMessage"
             payload = urllib.parse.urlencode({
-                "chat_id": str(target),
+                "chat_id": target_clean,
                 "text": text,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": "true",
@@ -184,12 +196,26 @@ def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
                 headers={"User-Agent": "EveryCryptoBot/2.0"}
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
+                attempt_info["status"] = resp.status
+                details["attempts"].append(attempt_info)
                 if resp.status == 200:
-                    return True
+                    return True, details
+        except urllib.error.HTTPError as e:
+            attempt_info["error"] = f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"
+            details["attempts"].append(attempt_info)
+            print(f"⚠️ Telegram delivery to {target_clean} failed: {attempt_info['error']}")
         except Exception as e:
-            print(f"⚠️ Telegram delivery to {target} failed: {e}")
+            attempt_info["error"] = str(e)
+            details["attempts"].append(attempt_info)
+            print(f"⚠️ Telegram delivery to {target_clean} failed: {e}")
 
-    return False
+    return False, details
+
+
+def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
+    success, _ = send_telegram_detailed(text, chat_id)
+    return success
+
 
 
 
