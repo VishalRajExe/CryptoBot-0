@@ -198,8 +198,28 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
 
+        if path == "/api/debug":
+            try:
+                import glob
+                log_files = glob.glob(os.path.join(LOGS_DIR, "*"))
+                from multi_bot import _dashboard_state
+                return self._send_json({
+                    "threads": [t.name for t in threading.enumerate()],
+                    "log_files": [os.path.basename(f) for f in log_files],
+                    "dashboard_state_keys": list(_dashboard_state.keys()),
+                    "env_keys": [k for k in os.environ.keys() if "ALPACA" in k or "TELEGRAM" in k],
+                })
+            except Exception as e:
+                return self._send_json({"error": str(e)}, status=500)
+
         if path == "/api/live_state":
             data = _read_json_file(LIVE_STATE_FILE)
+            if not data:
+                try:
+                    from multi_bot import _dashboard_state
+                    data = _dashboard_state
+                except Exception:
+                    pass
             return self._send_json(data)
 
         if path == "/api/multi_state":
