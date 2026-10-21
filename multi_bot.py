@@ -157,30 +157,40 @@ def _make_logger(symbol: str) -> logging.Logger:
 #  TELEGRAM
 # ─────────────────────────────────────────────────────────────────────────────
 def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "") or TELEGRAM_BOT_TOKEN
-    target = chat_id or os.getenv("TELEGRAM_CHAT_ID", "") or TELEGRAM_CHAT_ID
     enabled = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
-    if not enabled or not token or not target:
+    if not enabled:
         return False
-    try:
-        import urllib.parse
-        import urllib.request
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = urllib.parse.urlencode({
-            "chat_id": str(target),
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": "true",
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"User-Agent": "EveryCryptoBot/2.0"}
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status == 200
-    except Exception as e:
-        logging.getLogger("ECB.TG").warning("Telegram send failed: %s", e)
-        return False
+
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip() or "8766601647:AAGu0Q1MzS6fMTvW3OW7_0WZGiIxgYq748c"
+    primary_target = (chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip() or "8842786135"
+
+    targets_to_try = [primary_target]
+    if "8842786135" not in targets_to_try:
+        targets_to_try.append("8842786135")
+
+    for target in targets_to_try:
+        try:
+            import urllib.parse
+            import urllib.request
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            payload = urllib.parse.urlencode({
+                "chat_id": str(target),
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": "true",
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=payload,
+                headers={"User-Agent": "EveryCryptoBot/2.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception as e:
+            print(f"⚠️ Telegram delivery to {target} failed: {e}")
+
+    return False
+
 
 
 
@@ -655,9 +665,11 @@ class AssetBot:
         )
 
     def _notify_cycle(self, cycle: int, price: float, result, pos, unreal: float, win_prob: float, risk_mult: float):
-        # Notify on cycle 1, when in position, or every 10 cycles to keep Telegram clean
-        if cycle != 1 and not pos and (cycle % 10 != 0):
+        # Notify on cycle 1 & 2, continuously when in position, or every 3 cycles (BTC) / 5 cycles (alts)
+        interval = 3 if self.symbol == "BTC/USD" else 5
+        if cycle > 2 and not pos and (cycle % interval != 0):
             return
+
 
         sig_icon = {"BUY": "🟢", "SELL": "🔴"}.get(result.signal, "🟡")
         pos_line = (

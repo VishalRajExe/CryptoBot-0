@@ -222,6 +222,19 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 return self._send_json({"error": str(e)}, status=500)
 
+        if path == "/api/telegram_test":
+            try:
+                from multi_bot import send_telegram
+                success = send_telegram(
+                    "🧪 <b>EveryCryptoBot Live Pulse Test</b>\n\n"
+                    "✅ Telegram pipeline confirmed operational from Render container.\n"
+                    f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+                )
+                return self._send_json({"sent": success, "timestamp": datetime.now(timezone.utc).isoformat()})
+            except Exception as e:
+                return self._send_json({"error": str(e)}, status=500)
+
+
         if path == "/api/live_state":
             data = _read_json_file(LIVE_STATE_FILE)
             if not data:
