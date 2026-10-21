@@ -308,7 +308,28 @@ class ThreadingServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
 
 
+_bots_started = False
+_bots_lock = threading.Lock()
+
+
+def ensure_bots_running():
+    global _bots_started
+    with _bots_lock:
+        if not _bots_started:
+            _bots_started = True
+            try:
+                from multi_bot import start_all_bots
+                t = threading.Thread(target=start_all_bots, daemon=True, name="BotSupervisor")
+                t.start()
+                print("🚀 Bot supervisor started in background thread.")
+            except Exception as e:
+                print(f"❌ Error starting bot supervisor: {e}")
+
+
 def start_dashboard(auto_open: bool = True):
+    # Automatically ensure trading bots are running alongside the dashboard
+    ensure_bots_running()
+
     try:
         httpd = ThreadingServer(("0.0.0.0", PORT), DashboardHandler)
         print(f"\n============================================================")
