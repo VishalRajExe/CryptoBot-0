@@ -1,0 +1,162 @@
+{
+  "symbol": "SOL/USD",
+  "strategy": "BinHCluc",
+  "days": 14,
+  "timeframe_minutes": 5,
+  "stake_usd": 300.0,
+  "total_trades": 13,
+  "wins": 5,
+  "losses": 8,
+  "win_rate_pct": 38.46,
+  "total_pnl": 8.0126,
+  "avg_win": 5.1772,
+  "avg_loss": -2.2341,
+  "profit_factor": 1.448,
+  "max_drawdown": 5.5471,
+  "sharpe_ratio": 2.49,
+  "trades": [
+    {
+      "entry_time": "2026-10-08 15:10:00+00:00",
+      "exit_time": "2026-10-08 15:20:00+00:00",
+      "entry_price": 110.89,
+      "exit_price": 109.16,
+      "qty": 2.705384,
+      "pnl": -2.0085,
+      "pnl_pct": -0.669,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-08 15:25:00+00:00",
+      "exit_time": "2026-10-08 17:00:00+00:00",
+      "entry_price": 108.795,
+      "exit_price": 107.35,
+      "qty": 2.75748,
+      "pnl": -3.4573,
+      "pnl_pct": -1.152,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-08 17:20:00+00:00",
+      "exit_time": "2026-10-08 19:00:00+00:00",
+      "entry_price": 106.26,
+      "exit_price": 108.6315,
+      "qty": 2.823264,
+      "pnl": 5.4133,
+      "pnl_pct": 1.804,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-09 00:15:00+00:00",
+      "exit_time": "2026-10-09 02:45:00+00:00",
+      "entry_price": 108.923,
+      "exit_price": 110.2025,
+      "qty": 2.754239,
+      "pnl": 2.9013,
+      "pnl_pct": 0.967,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-12 14:35:00+00:00",
+      "exit_time": "2026-10-12 16:55:00+00:00",
+      "entry_price": 108.61,
+      "exit_price": 107.675,
+      "qty": 2.762177,
+      "pnl": -2.2078,
+      "pnl_pct": -0.736,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-12 21:45:00+00:00",
+      "exit_time": "2026-10-12 23:00:00+00:00",
+      "entry_price": 106.85,
+      "exit_price": 106.0155,
+      "qty": 2.807674,
+      "pnl": -1.9219,
+      "pnl_pct": -0.641,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-13 00:50:00+00:00",
+      "exit_time": "2026-10-13 01:35:00+00:00",
+      "entry_price": 102.7935,
+      "exit_price": 104.852,
+      "qty": 2.918472,
+      "pnl": 5.7065,
+      "pnl_pct": 1.902,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-14 12:30:00+00:00",
+      "exit_time": "2026-10-14 13:10:00+00:00",
+      "entry_price": 105.934,
+      "exit_price": 104.831,
+      "qty": 2.831952,
+      "pnl": -2.7306,
+      "pnl_pct": -0.91,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-15 02:20:00+00:00",
+      "exit_time": "2026-10-15 04:40:00+00:00",
+      "entry_price": 101.34,
+      "exit_price": 104.053,
+      "qty": 2.960332,
+      "pnl": 7.8188,
+      "pnl_pct": 2.606,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-15 13:50:00+00:00",
+      "exit_time": "2026-10-15 14:05:00+00:00",
+      "entry_price": 100.864,
+      "exit_price": 102.95,
+      "qty": 2.974302,
+      "pnl": 4.0459,
+      "pnl_pct": 1.349,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-16 15:05:00+00:00",
+      "exit_time": "2026-10-16 15:55:00+00:00",
+      "entry_price": 104.5485,
+      "exit_price": 103.6415,
+      "qty": 2.869482,
+      "pnl": -2.2896,
+      "pnl_pct": -0.763,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-17 21:25:00+00:00",
+      "exit_time": "2026-10-17 21:35:00+00:00",
+      "entry_price": 102.45,
+      "exit_price": 101.58,
+      "qty": 2.928258,
+      "pnl": -1.5988,
+      "pnl_pct": -0.533,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-18 13:30:00+00:00",
+      "exit_time": "2026-10-18 19:20:00+00:00",
+      "entry_price": 102.317,
+      "exit_price": 101.7445,
+      "qty": 2.932064,
+      "pnl": -1.6587,
+      "pnl_pct": -0.553,
+      "reason": "stop_loss",
+      "win": false
+    }
+  ]
+}

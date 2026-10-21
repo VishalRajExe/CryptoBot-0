@@ -426,8 +426,8 @@
       </div>
       <div class="stat-card">
         <div class="stat-card-title">Altcoins Monitored</div>
-        <div class="stat-card-val">5</div>
-        <div class="stat-card-sub">ETH, SOL, DOGE, LINK, AVAX</div>
+        <div class="stat-card-val">6</div>
+        <div class="stat-card-sub">ETH, SOL, DOGE, LINK, AAVE, AVAX</div>
       </div>
       <div class="stat-card">
         <div class="stat-card-title">Telegram Notifications</div>
@@ -501,6 +501,7 @@
           <button class="selector-btn" data-sym="SOL" onclick="selectLogSymbol('SOL')">☀️ SOL/USD</button>
           <button class="selector-btn" data-sym="DOGE" onclick="selectLogSymbol('DOGE')">🐶 DOGE/USD</button>
           <button class="selector-btn" data-sym="LINK" onclick="selectLogSymbol('LINK')">🔗 LINK/USD</button>
+          <button class="selector-btn" data-sym="AAVE" onclick="selectLogSymbol('AAVE')">👻 AAVE/USD</button>
           <button class="selector-btn" data-sym="AVAX" onclick="selectLogSymbol('AVAX')">🔺 AVAX/USD</button>
         </div>
 
@@ -525,6 +526,34 @@
     </div>
 
     <div class="benchmarks-grid" id="benchmarksGrid">
+      <!-- ETH/USD Bench -->
+      <div class="bench-card" style="border-color:rgba(16,185,129,0.3)">
+        <div class="bench-top">
+          <div class="bench-title">🔷 ETH/USD (BinHCluc)</div>
+          <span class="bench-verdict verdict-profitable">PROFITABLE</span>
+        </div>
+        <div class="bench-stats">
+          <div><div class="bstat-lbl">Win Rate</div><div class="bstat-val color-green">50.0%</div></div>
+          <div><div class="bstat-lbl">Profit Factor</div><div class="bstat-val color-green">2.59</div></div>
+          <div><div class="bstat-lbl">Sharpe</div><div class="bstat-val color-green">6.20</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">10 trades • Total PnL: +$25.45 • Max DD: $7.08 • Freqtrade Cluc Reversion</div>
+      </div>
+
+      <!-- AAVE/USD Bench -->
+      <div class="bench-card" style="border-color:rgba(16,185,129,0.3)">
+        <div class="bench-top">
+          <div class="bench-title">👻 AAVE/USD (VwapBreakout)</div>
+          <span class="bench-verdict verdict-profitable">PROFITABLE</span>
+        </div>
+        <div class="bench-stats">
+          <div><div class="bstat-lbl">Win Rate</div><div class="bstat-val color-green">42.9%</div></div>
+          <div><div class="bstat-lbl">Profit Factor</div><div class="bstat-val color-green">1.46</div></div>
+          <div><div class="bstat-lbl">Sharpe</div><div class="bstat-val color-green">2.61</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">21 trades • Total PnL: +$14.98 • Max DD: $9.52 • Institutional VWAP Breakout</div>
+      </div>
+
       <!-- SOL/USD Bench -->
       <div class="bench-card">
         <div class="bench-top">
@@ -532,11 +561,11 @@
           <span class="bench-verdict verdict-profitable">PROFITABLE</span>
         </div>
         <div class="bench-stats">
-          <div><div class="bstat-lbl">Win Rate</div><div class="bstat-val color-green">45.5%</div></div>
+          <div><div class="bstat-lbl">Win Rate</div><div class="bstat-val color-green">45.6%</div></div>
           <div><div class="bstat-lbl">Profit Factor</div><div class="bstat-val color-green">1.39</div></div>
           <div><div class="bstat-lbl">Sharpe</div><div class="bstat-val color-green">2.42</div></div>
         </div>
-        <div style="font-size:11px;color:var(--muted)">167 trades • Total PnL: +$8.54 • Max DD: $2.71</div>
+        <div style="font-size:11px;color:var(--muted)">171 trades • Total PnL: +$8.69 • Max DD: $2.86</div>
       </div>
 
       <!-- DOGE/USD Bench -->

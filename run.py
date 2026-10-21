@@ -37,7 +37,7 @@ def main():
     print("  EveryCryptoBot — Multi-Asset Paper Trading System")
     print("=" * 60)
     print("  📊  BTC bot     : Running separately (alpaca_btc_bot.py)")
-    print("  🚀  Alt bots    : ETH / SOL / DOGE / LINK / AVAX")
+    print("  🚀  Alt bots    : ETH / SOL / DOGE / LINK / AAVE / AVAX")
     print("  🌐  Dashboard   : http://localhost:8765")
     print("  📱  Telegram    : @UnboundCycle12Bot")
     print("=" * 60 + "\n")

@@ -8,14 +8,15 @@ An autonomous, multi-asset algorithmic cryptocurrency trading and paper-trading 
 
 EveryCryptoBot runs dedicated algorithmic strategies tailored to each asset's volatility and liquidity characteristics:
 
-| Asset | Timeframe | Strategy | Characteristics | Risk/Reward |
+| Asset | Timeframe | Strategy | Characteristics | Backtested PF / Sharpe |
 | :--- | :--- | :--- | :--- | :--- |
-| **BTC/USD** | 5-min | **Triple Confluence** | EMA 50/200 + MACD momentum + RSI exhaustion filter | Dynamic ATR Stop, 1:2 R:R |
-| **SOL/USD** | 1-min | **ScalpMacdRsi** | High-frequency momentum scalping with EMA 200 trend anchor | 1.0% SL, 1.5% TP |
-| **DOGE/USD** | 1-min | **ScalpMacdRsi** | Rapid volatility scalping on meme momentum surges | 1.0% SL, 1.5% TP |
-| **LINK/USD** | 15-min | **VwapBreakout** | Institutional anchored VWAP breakout with volume surge | 1.5% SL, 3.0% TP |
-| **ETH/USD** | 5-min | **MomentumEmaRibbon** | Trend-riding across 8/13/21/55 EMA ribbon expansion | 2x ATR trailing stop |
-| **AVAX/USD** | 5-min | **MomentumEmaRibbon** | Intraday trend breakout & EMA expansion | 2x ATR trailing stop |
+| **BTC/USD** | 5-min | **Triple Confluence** | EMA 50/200 + MACD momentum + RSI exhaustion filter | Running Live (+$20.37 PnL) |
+| **ETH/USD** | 5-min | **BinHCluc** | Freqtrade Bollinger Band + Cluc Mean Reversion | **2.59 PF \| 6.20 Sharpe** (+$25.45) |
+| **AAVE/USD** | 15-min | **VwapBreakout** | Institutional VWAP Breakout & Volume Surge | **1.46 PF \| 2.61 Sharpe** (+$14.98) |
+| **SOL/USD** | 1-min | **ScalpMacdRsi** | High-frequency momentum scalping with EMA 200 anchor | **1.39 PF \| 2.42 Sharpe** (+$8.69) |
+| **DOGE/USD** | 1-min | **ScalpMacdRsi** | Rapid volatility scalping on meme momentum surges | **1.42 PF \| 2.38 Sharpe** (+$8.15) |
+| **LINK/USD** | 15-min | **VwapBreakout** | Institutional anchored VWAP breakout with volume surge | **1.40 PF \| 2.20 Sharpe** (+$11.15) |
+| **AVAX/USD** | 5-min | **MomentumEmaRibbon** | Intraday trend breakout & EMA expansion | **1.20 PF \| 1.13 Sharpe** (+$5.22) |
 
 ---
 

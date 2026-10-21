@@ -1,0 +1,129 @@
+{
+  "symbol": "ETH/USD",
+  "strategy": "BinHCluc",
+  "days": 14,
+  "timeframe_minutes": 5,
+  "stake_usd": 500.0,
+  "total_trades": 10,
+  "wins": 5,
+  "losses": 5,
+  "win_rate_pct": 50.0,
+  "total_pnl": 25.4462,
+  "avg_win": 8.2906,
+  "avg_loss": -3.2014,
+  "profit_factor": 2.59,
+  "max_drawdown": 7.083,
+  "sharpe_ratio": 6.198,
+  "trades": [
+    {
+      "entry_time": "2026-10-08 15:25:00+00:00",
+      "exit_time": "2026-10-08 15:55:00+00:00",
+      "entry_price": 2463.5,
+      "exit_price": 2433.8,
+      "qty": 0.202963,
+      "pnl": -4.6546,
+      "pnl_pct": -0.931,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-14 12:30:00+00:00",
+      "exit_time": "2026-10-14 13:10:00+00:00",
+      "entry_price": 2482.9815,
+      "exit_price": 2463.3225,
+      "qty": 0.201371,
+      "pnl": -3.2781,
+      "pnl_pct": -0.656,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-14 13:55:00+00:00",
+      "exit_time": "2026-10-14 14:15:00+00:00",
+      "entry_price": 2450.145,
+      "exit_price": 2429.483,
+      "qty": 0.20407,
+      "pnl": -3.8049,
+      "pnl_pct": -0.761,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-15 02:20:00+00:00",
+      "exit_time": "2026-10-15 15:00:00+00:00",
+      "entry_price": 2348.5,
+      "exit_price": 2422.775,
+      "qty": 0.212902,
+      "pnl": 13.1908,
+      "pnl_pct": 2.638,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-16 17:15:00+00:00",
+      "exit_time": "2026-10-17 06:35:00+00:00",
+      "entry_price": 2391.06,
+      "exit_price": 2430.218,
+      "qty": 0.209112,
+      "pnl": 8.0297,
+      "pnl_pct": 1.606,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-17 21:25:00+00:00",
+      "exit_time": "2026-10-17 21:30:00+00:00",
+      "entry_price": 2391.646,
+      "exit_price": 2380.9,
+      "qty": 0.209061,
+      "pnl": -2.0391,
+      "pnl_pct": -0.408,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-17 21:35:00+00:00",
+      "exit_time": "2026-10-18 01:40:00+00:00",
+      "entry_price": 2364.525,
+      "exit_price": 2414.005,
+      "qty": 0.211459,
+      "pnl": 10.0029,
+      "pnl_pct": 2.001,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-18 13:30:00+00:00",
+      "exit_time": "2026-10-18 15:35:00+00:00",
+      "entry_price": 2382.5,
+      "exit_price": 2371.835,
+      "qty": 0.209864,
+      "pnl": -2.2302,
+      "pnl_pct": -0.446,
+      "reason": "stop_loss",
+      "win": false
+    },
+    {
+      "entry_time": "2026-10-18 19:35:00+00:00",
+      "exit_time": "2026-10-18 21:35:00+00:00",
+      "entry_price": 2335.7,
+      "exit_price": 2361.085,
+      "qty": 0.214069,
+      "pnl": 5.3653,
+      "pnl_pct": 1.073,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-20 01:05:00+00:00",
+      "exit_time": "2026-10-20 02:50:00+00:00",
+      "entry_price": 2375.32,
+      "exit_price": 2399.159,
+      "qty": 0.210498,
+      "pnl": 4.8644,
+      "pnl_pct": 0.973,
+      "reason": "take_profit",
+      "win": true
+    }
+  ]
+}

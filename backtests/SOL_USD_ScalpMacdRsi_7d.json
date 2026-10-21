@@ -4,16 +4,16 @@
   "days": 7,
   "timeframe_minutes": 1,
   "stake_usd": 300.0,
-  "total_trades": 167,
-  "wins": 76,
-  "losses": 91,
-  "win_rate_pct": 45.51,
-  "total_pnl": 8.5428,
-  "avg_win": 0.4003,
-  "avg_loss": -0.2404,
-  "profit_factor": 1.39,
-  "max_drawdown": 2.7161,
-  "sharpe_ratio": 2.426,
+  "total_trades": 171,
+  "wins": 78,
+  "losses": 93,
+  "win_rate_pct": 45.61,
+  "total_pnl": 8.6858,
+  "avg_win": 0.3983,
+  "avg_loss": -0.2407,
+  "profit_factor": 1.388,
+  "max_drawdown": 2.8637,
+  "sharpe_ratio": 2.416,
   "trades": [
     {
       "entry_time": "2026-10-14 17:35:00+00:00",
@@ -1851,6 +1851,50 @@
       "pnl_pct": -0.082,
       "reason": "stop_loss",
       "win": "False"
+    },
+    {
+      "entry_time": "2026-10-21 11:48:00+00:00",
+      "exit_time": "2026-10-21 11:52:00+00:00",
+      "entry_price": 106.794,
+      "exit_price": 106.935,
+      "qty": 2.809147,
+      "pnl": 0.3573,
+      "pnl_pct": 0.119,
+      "reason": "take_profit",
+      "win": "True"
+    },
+    {
+      "entry_time": "2026-10-21 12:03:00+00:00",
+      "exit_time": "2026-10-21 12:05:00+00:00",
+      "entry_price": 106.85,
+      "exit_price": 106.709,
+      "qty": 2.807674,
+      "pnl": -0.2305,
+      "pnl_pct": -0.077,
+      "reason": "stop_loss",
+      "win": "False"
+    },
+    {
+      "entry_time": "2026-10-21 12:06:00+00:00",
+      "exit_time": "2026-10-21 12:08:00+00:00",
+      "entry_price": 106.91,
+      "exit_price": 106.7655,
+      "qty": 2.806099,
+      "pnl": -0.2744,
+      "pnl_pct": -0.091,
+      "reason": "stop_loss",
+      "win": "False"
+    },
+    {
+      "entry_time": "2026-10-21 12:10:00+00:00",
+      "exit_time": "2026-10-21 12:28:00+00:00",
+      "entry_price": 106.8565,
+      "exit_price": 106.96,
+      "qty": 2.807504,
+      "pnl": 0.2906,
+      "pnl_pct": 0.097,
+      "reason": "end_of_data",
+      "win": true
     }
   ]
 }

@@ -90,10 +90,10 @@ def get_logs_for_symbol(symbol: str, max_lines: int = 100) -> dict:
             for l in _tail_file(btc_file, max_lines // 2):
                 all_lines.append(f"[BTC] {l}")
         # Altcoin logs
-        for s in ["ETHUSD", "SOLUSD", "DOGEUSD", "LINKUSD", "AVAXUSD"]:
+        for s in ["ETHUSD", "SOLUSD", "DOGEUSD", "LINKUSD", "AAVEUSD", "AVAXUSD"]:
             s_file = _get_latest_file(os.path.join(LOGS_DIR, f"{s}_*.log"))
             if s_file:
-                for l in _tail_file(s_file, max_lines // 4):
+                for l in _tail_file(s_file, max_lines // 5):
                     all_lines.append(l)
 
         # Sort roughly by timestamp if present

@@ -73,7 +73,7 @@ class ScalpMacdRsi(BaseStrategy):
             return SignalResult("HOLD", 0, 0, 0.0, "Not enough bars")
 
         last = df.iloc[-1]
-        atr  = last["atr"]
+        atr  = last["atr"] if pd.notna(last["atr"]) else current_price * 0.005
         risk = atr * p["atr_sl_mult"]
 
         trend_up   = current_price > last["ema200"]

@@ -1,0 +1,30 @@
+{
+  "symbol": "SOL/USD",
+  "strategy": "BinHCluc",
+  "days": 7,
+  "timeframe_minutes": 5,
+  "stake_usd": 300.0,
+  "total_trades": 1,
+  "wins": 1,
+  "losses": 0,
+  "win_rate_pct": 100.0,
+  "total_pnl": 7.8188,
+  "avg_win": 7.8188,
+  "avg_loss": 0,
+  "profit_factor": 7818.8,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": 0,
+  "trades": [
+    {
+      "entry_time": "2026-10-15 02:20:00+00:00",
+      "exit_time": "2026-10-15 04:40:00+00:00",
+      "entry_price": 101.34,
+      "exit_price": 104.053,
+      "qty": 2.960332,
+      "pnl": 7.8188,
+      "pnl_pct": 2.606,
+      "reason": "take_profit",
+      "win": true
+    }
+  ]
+}
