@@ -173,6 +173,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         path = parsed.path
 
         if path in ("/health", "/api/health"):
+            api_key = os.getenv("ALPACA_API_KEY", "")
+            secret = os.getenv("ALPACA_SECRET_KEY", "")
+            tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+            tg_chat = os.getenv("TELEGRAM_CHAT_ID", "")
             try:
                 from memory import TradeMemory
                 mem = TradeMemory()
@@ -186,6 +190,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return self._send_json({
                 "status": "healthy",
                 "service": "EveryCryptoBot",
+                "alpaca_configured": bool(api_key and secret),
+                "alpaca_key_prefix": (api_key[:6] + "...") if api_key else "MISSING",
+                "telegram_configured": bool(tg_token and tg_chat),
                 "active_positions": pos_count,
                 "total_realized_pnl": total_pnl,
                 "timestamp": datetime.now(timezone.utc).isoformat()

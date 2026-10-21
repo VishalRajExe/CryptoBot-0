@@ -686,9 +686,14 @@ def main():
                         help="Run single asset (e.g. SOL/USD). Omit to run all.")
     args = parser.parse_args()
 
-    if not API_KEY or not API_SECRET:
-        print("❌ Missing Alpaca API credentials in .env")
-        sys.exit(1)
+    global API_KEY, API_SECRET
+    while not API_KEY or not API_SECRET:
+        print("❌ Missing Alpaca API credentials in environment (ALPACA_API_KEY / ALPACA_SECRET_KEY)!")
+        print("   Please set them in Render Dashboard -> Environment Variables. Retrying in 20s...")
+        time.sleep(20)
+        load_dotenv()
+        API_KEY = os.getenv("ALPACA_API_KEY", "")
+        API_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
 
     if args.symbol:
         if args.symbol not in ASSET_CONFIG:

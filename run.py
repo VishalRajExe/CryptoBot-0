@@ -67,10 +67,17 @@ def main():
             cmd += ["--symbol", args.symbol]
 
     print(f"🚀  Launching: {' '.join(cmd)}\n")
-    try:
-        subprocess.run(cmd)
-    except KeyboardInterrupt:
-        print("\n🛑  Stopped by user.")
+    while True:
+        try:
+            proc = subprocess.run(cmd)
+            print(f"⚠️ Bot process exited (code {proc.returncode}). Restarting in 15s...")
+            time.sleep(15)
+        except KeyboardInterrupt:
+            print("\n🛑  Stopped by user.")
+            break
+        except Exception as e:
+            print(f"Runner caught exception: {e}. Retrying in 15s...")
+            time.sleep(15)
 
 
 if __name__ == "__main__":
