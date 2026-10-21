@@ -132,7 +132,11 @@ def get_backtest_summaries() -> list:
                 results.append(summary)
         except Exception:
             pass
+    return results
+
+
 def ensure_bots_running():
+
     active_bot_count = len([t for t in threading.enumerate() if t.name.startswith("Bot-") and t.is_alive()])
     if active_bot_count < 7:
         try:
