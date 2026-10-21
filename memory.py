@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_memory.db")
-_db_lock = threading.Lock()
+_db_lock = threading.RLock()
 log = logging.getLogger("ECB.Memory")
 
 
@@ -348,6 +348,14 @@ class TradeMemory:
             for r in metrics_rows:
                 sym = r["symbol"]
                 wr = round((r["wins"] / r["total_trades"] * 100), 1) if r["total_trades"] > 0 else 0.0
+                is_cooling = False
+                if r["cooldown_until"]:
+                    try:
+                        cd_time = datetime.fromisoformat(r["cooldown_until"])
+                        if datetime.now(timezone.utc) < cd_time:
+                            is_cooling = True
+                    except Exception:
+                        pass
                 summary["symbols"][sym] = {
                     "total_trades": r["total_trades"],
                     "wins": r["wins"],
@@ -357,7 +365,7 @@ class TradeMemory:
                     "consecutive_losses": r["consecutive_losses"],
                     "risk_multiplier": r["risk_multiplier"],
                     "cooldown_until": r["cooldown_until"],
-                    "cooling_active": self.is_in_cooldown(sym)
+                    "cooling_active": is_cooling
                 }
             return summary
 
@@ -401,4 +409,16 @@ class TradeMemory:
                 "total_mistakes_remembered": total_mistakes,
                 "recent_mistakes": [dict(r) for r in recent]
             }
+
+    def get_symbol_total_pnl(self, symbol: str) -> float:
+        """Returns total realized PnL for a given symbol from symbol_metrics."""
+        with _db_lock, self._get_conn() as conn:
+            row = conn.execute("SELECT total_pnl FROM symbol_metrics WHERE symbol = ?", (symbol,)).fetchone()
+            return float(row["total_pnl"]) if row and row["total_pnl"] is not None else 0.0
+
+    def get_total_realized_pnl(self) -> float:
+        """Returns sum of all realized trade PnL across all altcoin bots."""
+        with _db_lock, self._get_conn() as conn:
+            row = conn.execute("SELECT SUM(pnl) as s FROM trade_history").fetchone()
+            return float(row["s"]) if row and row["s"] is not None else 0.0
 

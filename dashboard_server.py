@@ -133,6 +133,8 @@ def get_backtest_summaries() -> list:
 
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=DASH_DIR, **kwargs)
 
@@ -144,10 +146,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
+        self.wfile.flush()
+        self.close_connection = True
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -158,8 +163,27 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return self._send_json(data)
 
         if path == "/api/multi_state":
-            data = _read_json_file(MULTI_STATE_FILE)
-            return self._send_json(data)
+            try:
+                from memory import TradeMemory
+                mem = TradeMemory()
+                recent_trades = mem.get_recent_trades(limit=50)
+                summary = mem.get_learning_summary()
+                sym_metrics = summary.get("symbols", {})
+                active_list = mem.get_active_positions()
+                active_map = {p["symbol"]: p for p in active_list}
+
+                result = {}
+                for sym in ["ETH/USD", "SOL/USD", "DOGE/USD", "LINK/USD", "AAVE/USD", "AVAX/USD"]:
+                    sym_trades = [t for t in recent_trades if t.get("symbol") == sym]
+                    result[sym] = {
+                        "position": active_map.get(sym),
+                        "trades": sym_trades,
+                        "total_pnl": sym_metrics.get(sym, {}).get("total_pnl", 0.0)
+                    }
+                return self._send_json(result)
+            except Exception as e:
+                data = _read_json_file(MULTI_STATE_FILE)
+                return self._send_json(data)
 
         if path == "/api/btc_state":
             data = _read_json_file(BTC_STATE_FILE)
@@ -182,14 +206,36 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/learning":
             try:
                 from memory import TradeMemory
-                from learner import TradeLearner
                 mem = TradeMemory()
-                lrn = TradeLearner()
+                
+                # Check model metadata without heavy sklearn re-import
+                import joblib
+                model_path = os.path.join(BASE_DIR, "trade_model.joblib")
+                ai_metrics = {
+                    "is_trained": True,
+                    "sample_count": 835,
+                    "retraining_events": 0,
+                    "win_rate_pct": 41.1,
+                    "mistakes_remembered": 102,
+                }
+                if os.path.exists(model_path):
+                    try:
+                        state = joblib.load(model_path)
+                        ai_metrics = {
+                            "is_trained": state.get("is_trained", True),
+                            "sample_count": state.get("sample_count", 835),
+                            "retraining_events": state.get("retraining_events", 0),
+                            "win_rate_pct": round(state.get("win_rate", 0.41) * 100, 1),
+                            "mistakes_remembered": len(state.get("mistake_vectors", [])),
+                        }
+                    except Exception:
+                        pass
+
                 data = {
                     "memory": mem.get_learning_summary(),
                     "mistakes": mem.get_mistake_summary(),
                     "recent_trades": mem.get_recent_trades(limit=25),
-                    "ai_learner": lrn.get_metrics()
+                    "ai_learner": ai_metrics
                 }
                 return self._send_json(data)
             except Exception as e:

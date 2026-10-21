@@ -534,6 +534,7 @@ class AssetBot:
                     "cooling_active": cooling_active,
                     "risk_multiplier": risk_mult,
                     "cycle": cycle,
+                    "total_pnl": round(self.memory.get_symbol_total_pnl(self.symbol), 4),
                 })
 
                 # Telegram cycle update

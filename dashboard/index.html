@@ -402,12 +402,12 @@
           <div class="stat-chip"><span>Entry:</span> <b id="btcEntryText">—</b></div>
           <div class="stat-chip"><span>Stop Loss:</span> <b id="btcSlText" style="color:var(--red)">—</b></div>
           <div class="stat-chip"><span>Take Profit:</span> <b id="btcTpText" style="color:var(--green)">—</b></div>
-          <div class="stat-chip"><span>Session PnL:</span> <b id="btcSessionPnl" class="color-green">+$20.3731</b></div>
+          <div class="stat-chip"><span>Session PnL:</span> <b id="btcSessionPnl">$0.0000</b></div>
         </div>
       </div>
       <div class="btc-right">
-        <div class="btc-position-badge pos-long" id="btcBadge">● ACTIVE LONG</div>
-        <div class="btc-pnl color-green" id="btcPnlVal">+$20.37</div>
+        <div class="btc-position-badge pos-flat" id="btcBadge">FLAT</div>
+        <div class="btc-pnl" id="btcPnlVal">$0.00</div>
         <div style="font-size:11px;color:var(--muted)">BTC Bot Running Separately</div>
       </div>
     </div>
@@ -416,13 +416,13 @@
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-card-title">Combined Portfolio PnL</div>
-        <div class="stat-card-val color-green" id="totalCombinedPnl">+$28.9159</div>
-        <div class="stat-card-sub" id="pnlBreakdown">BTC (+$20.37) + Alts (+$8.54)</div>
+        <div class="stat-card-val" id="totalCombinedPnl">$0.0000</div>
+        <div class="stat-card-sub" id="pnlBreakdown">BTC ($0.00) + Alts ($0.00)</div>
       </div>
       <div class="stat-card">
         <div class="stat-card-title">Active Paper Positions</div>
-        <div class="stat-card-val" id="activePositionsCount" style="color:var(--blue)">1</div>
-        <div class="stat-card-sub">Out of 6 monitored symbols</div>
+        <div class="stat-card-val" id="activePositionsCount" style="color:var(--blue)">0</div>
+        <div class="stat-card-sub">Out of 7 monitored symbols (1 BTC + 6 Alts)</div>
       </div>
       <div class="stat-card">
         <div class="stat-card-title">Altcoins Monitored</div>
@@ -716,24 +716,36 @@
       try {
         // BTC State
         const btcRes = await fetch(`/api/btc_state?t=${Date.now()}`);
-        let btcPnl = 20.3731;
+        let btcPnl = 0.0;
+        let btcHasPos = false;
         if (btcRes.ok) {
           const btc = await btcRes.json();
-          btcPnl = parseFloat(btc.total_pnl || 20.3731);
+          const btcRealized = (btc.total_pnl !== undefined && btc.total_pnl !== null) ? parseFloat(btc.total_pnl) : 0.0;
+          let btcUnrealized = 0.0;
           if (btc.position) {
+            btcHasPos = true;
+            btcUnrealized = parseFloat(btc.position.unrealized_pnl || 0.0);
+            const qtyStr = parseFloat(btc.position.qty).toFixed(6);
             document.getElementById("btcBadge").className = "btc-position-badge pos-long";
-            document.getElementById("btcBadge").textContent = `● LONG ${btc.position.qty} BTC`;
-            document.getElementById("btcPosText").textContent = `LONG ${btc.position.qty} BTC`;
-            document.getElementById("btcEntryText").textContent = `$${parseFloat(btc.position.entry_price).toLocaleString()}`;
-            document.getElementById("btcSlText").textContent = `$${parseFloat(btc.position.stop_loss).toLocaleString()}`;
-            document.getElementById("btcTpText").textContent = `$${parseFloat(btc.position.take_profit).toLocaleString()}`;
+            document.getElementById("btcBadge").textContent = `● LONG ${qtyStr} BTC`;
+            document.getElementById("btcPosText").textContent = `LONG ${qtyStr} BTC`;
+            document.getElementById("btcEntryText").textContent = `$${parseFloat(btc.position.entry_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById("btcSlText").textContent = `$${parseFloat(btc.position.stop_loss).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById("btcTpText").textContent = `$${parseFloat(btc.position.take_profit).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
           } else {
             document.getElementById("btcBadge").className = "btc-position-badge pos-flat";
             document.getElementById("btcBadge").textContent = "FLAT";
             document.getElementById("btcPosText").textContent = "FLAT — SCANNING";
+            document.getElementById("btcEntryText").textContent = "—";
+            document.getElementById("btcSlText").textContent = "—";
+            document.getElementById("btcTpText").textContent = "—";
           }
-          document.getElementById("btcSessionPnl").textContent = (btcPnl >= 0 ? "+" : "") + `$${btcPnl.toFixed(4)}`;
+          btcPnl = btcRealized + btcUnrealized;
+          const btcDisplay = (btcPnl >= 0 ? "+" : "") + `$${btcPnl.toFixed(4)}`;
+          document.getElementById("btcSessionPnl").textContent = btcDisplay;
+          document.getElementById("btcSessionPnl").style.color = btcPnl >= 0 ? "var(--green)" : "var(--red)";
           document.getElementById("btcPnlVal").textContent = (btcPnl >= 0 ? "+" : "") + `$${btcPnl.toFixed(2)}`;
+          document.getElementById("btcPnlVal").style.color = btcPnl >= 0 ? "var(--green)" : "var(--red)";
         }
 
         // Live Altcoins State
@@ -748,18 +760,20 @@
             const grid = document.getElementById("assetGrid");
             grid.innerHTML = symbols.map(sym => {
               const d = live[sym];
-              altPnl += parseFloat(d.total_pnl || 0);
+              const symPnl = parseFloat(d.total_pnl || 0);
+              const symUnreal = parseFloat(d.unrealized_pnl || 0);
+              altPnl += (symPnl + symUnreal);
               if (d.position) altPositions++;
 
               const sigClass = d.signal === "BUY" ? "sig-buy" : (d.signal === "SELL" ? "sig-sell" : "sig-hold");
               const sigIcon = d.signal === "BUY" ? "🟢" : (d.signal === "SELL" ? "🔴" : "🟡");
 
-              // Format indicators
+              // Format indicators safely handling 0 values
               const inds = d.indicators || {};
-              const rsi = inds.rsi ? inds.rsi.toFixed(1) : "—";
-              const macd = inds.macd ? inds.macd.toFixed(2) : "—";
-              const atr = inds.atr ? inds.atr.toFixed(2) : "—";
-              const vwap = inds.vwap ? inds.vwap.toFixed(2) : (inds.ema200 ? inds.ema200.toFixed(2) : "—");
+              const rsi = (inds.rsi !== undefined && inds.rsi !== null) ? Number(inds.rsi).toFixed(1) : "—";
+              const macd = (inds.macd !== undefined && inds.macd !== null) ? Number(inds.macd).toFixed(2) : ((inds.macd_hist !== undefined && inds.macd_hist !== null) ? Number(inds.macd_hist).toFixed(2) : "—");
+              const atr = (inds.atr !== undefined && inds.atr !== null) ? Number(inds.atr).toFixed(2) : "—";
+              const vwap = (inds.vwap !== undefined && inds.vwap !== null) ? Number(inds.vwap).toFixed(2) : ((inds.ema200 !== undefined && inds.ema200 !== null) ? Number(inds.ema200).toFixed(2) : "—");
               const vwapLbl = inds.vwap ? "VWAP" : "EMA200";
 
               let posHtml = `<div style="font-size:11px;color:var(--muted)">No open position • Scanning order flow</div>`;
@@ -777,6 +791,8 @@
                     </div>
                   </div>`;
               }
+
+              const pnlColor = symPnl > 0 ? "var(--green)" : (symPnl < 0 ? "var(--red)" : "var(--muted)");
 
               return `
                 <div class="asset-card">
@@ -808,7 +824,7 @@
                   ${posHtml}
 
                   <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px">
-                    <span>Session PnL: <b style="color:${d.total_pnl >= 0 ? 'var(--green)' : 'var(--red)'}">${d.total_pnl >= 0 ? '+' : ''}$${parseFloat(d.total_pnl||0).toFixed(4)}</b></span>
+                    <span>Session PnL: <b style="color:${pnlColor}">${symPnl >= 0 ? '+' : ''}$${symPnl.toFixed(4)}</b></span>
                     <span>Cycle #${d.cycle || 1}</span>
                   </div>
                 </div>`;
@@ -823,9 +839,9 @@
         document.getElementById("totalCombinedPnl").className =
           combined >= 0 ? "stat-card-val color-green" : "stat-card-val color-red";
         document.getElementById("pnlBreakdown").textContent =
-          `BTC ($${btcPnl.toFixed(2)}) + Altcoins (${altPnl >= 0 ? '+' : ''}$${altPnl.toFixed(2)})`;
+          `BTC (${btcPnl >= 0 ? '+' : ''}$${btcPnl.toFixed(2)}) + Altcoins (${altPnl >= 0 ? '+' : ''}$${altPnl.toFixed(2)})`;
         document.getElementById("activePositionsCount").textContent =
-          (altPositions + 1); // 1 BTC position
+          (altPositions + (btcHasPos ? 1 : 0));
 
         // Multi State (Trade history)
         const multiRes = await fetch(`/api/multi_state?t=${Date.now()}`);
@@ -849,7 +865,7 @@
                   <td>$${parseFloat(t.exit_price).toFixed(4)}</td>
                   <td class="${win ? 'win-text' : 'loss-text'}">${t.pnl >= 0 ? '+' : ''}$${parseFloat(t.pnl).toFixed(4)}</td>
                   <td class="${win ? 'win-text' : 'loss-text'}">${t.pnl_pct >= 0 ? '+' : ''}${parseFloat(t.pnl_pct).toFixed(2)}%</td>
-                  <td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3)">${t.reason}</span></td>
+                  <td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3)">${t.exit_reason || t.reason || 'signal'}</span></td>
                 </tr>`;
             }).join("");
           }

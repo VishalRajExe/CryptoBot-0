@@ -300,6 +300,35 @@ class AlpacaBTCBot:
 
         self.state   = load_state()
         self._validate_connection()
+        self.reconcile_position()
+
+    # ── Reconcile with Alpaca Ground Truth ────
+    def reconcile_position(self):
+        try:
+            pos = self.trading.get_open_position(SYMBOL.replace("/", ""))
+            pos_qty = float(pos.qty)
+            if pos_qty > 0:
+                cur_pos = self.state.get("position")
+                entry_p = float(pos.avg_entry_price) if hasattr(pos, "avg_entry_price") else float(pos.current_price)
+                if not cur_pos:
+                    self.state["position"] = {
+                        "order_id": getattr(pos, "asset_id", "reconciled"),
+                        "entry_price": entry_p,
+                        "qty": pos_qty,
+                        "entry_time": datetime.now(timezone.utc).isoformat(),
+                        "stop_loss": round(entry_p * 0.985, 2),
+                        "take_profit": round(entry_p * 1.03, 2),
+                    }
+                    save_state(self.state)
+                    log.info("Adopted open Alpaca BTC position: %.6f BTC @ $%.2f", pos_qty, entry_p)
+            else:
+                if self.state.get("position"):
+                    self.state["position"] = None
+                    save_state(self.state)
+        except Exception:
+            if self.state.get("position"):
+                self.state["position"] = None
+                save_state(self.state)
 
     # ── Connection Check ─────────────────────
     def _validate_connection(self):
@@ -668,6 +697,14 @@ class AlpacaBTCBot:
                 price = self.get_price()
                 if price is None:
                     price = float(df["close"].iloc[-1])
+
+                # Live state update for dashboard
+                pos = self.state.get("position")
+                if pos:
+                    unreal = (price - pos["entry_price"]) * pos["qty"]
+                    pos["current_price"] = price
+                    pos["unrealized_pnl"] = round(unreal, 4)
+                    save_state(self.state)
 
                 # 4. Check SL/TP first (always)
                 exited = self.check_exit_conditions(price)
