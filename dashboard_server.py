@@ -19,6 +19,7 @@ import sys
 import threading
 import urllib.parse
 import webbrowser
+from datetime import datetime, timezone
 
 if sys.platform == "win32":
     try:
@@ -26,7 +27,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-PORT = 8765
+PORT = int(os.getenv("PORT", "8765"))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DASH_DIR = os.path.join(BASE_DIR, "dashboard")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
@@ -156,9 +157,39 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.flush()
         self.close_connection = True
 
+    def do_HEAD(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path in ("/health", "/api/health", "/"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Connection", "close")
+            self.end_headers()
+        else:
+            super().do_HEAD()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        if path in ("/health", "/api/health"):
+            try:
+                from memory import TradeMemory
+                mem = TradeMemory()
+                positions = mem.get_active_positions()
+                pos_count = len(positions)
+                total_pnl = round(mem.get_total_realized_pnl(), 4)
+            except Exception:
+                pos_count = 0
+                total_pnl = 0.0
+
+            return self._send_json({
+                "status": "healthy",
+                "service": "EveryCryptoBot",
+                "active_positions": pos_count,
+                "total_realized_pnl": total_pnl,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
 
         if path == "/api/live_state":
             data = _read_json_file(LIVE_STATE_FILE)
@@ -257,13 +288,17 @@ class ThreadingServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 def start_dashboard(auto_open: bool = True):
     try:
         httpd = ThreadingServer(("0.0.0.0", PORT), DashboardHandler)
-        url = f"http://localhost:{PORT}"
         print(f"\n============================================================")
-        print(f"  Live Dashboard running at: {url}")
-        print(f"  API endpoints active: /api/live_state, /api/logs, /api/btc_state")
+        print(f"  Live Dashboard running on port {PORT}")
+        print(f"  Health Check: http://0.0.0.0:{PORT}/health")
+        print(f"  API endpoints active: /api/live_state, /api/logs, /api/btc_state, /health")
         print(f"============================================================\n")
-        if auto_open:
-            threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+        # Only open browser on local environments (suppress on Render/cloud)
+        if auto_open and not os.getenv("RENDER"):
+            try:
+                threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
+            except Exception:
+                pass
         httpd.serve_forever()
     except Exception as e:
         print(f"Dashboard server startup notice: {e}")

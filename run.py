@@ -44,7 +44,8 @@ def main():
     else:
         print("  📊  BTC bot     : alpaca_btc_bot.py")
         print("  🚀  Alt bots    : ETH / SOL / DOGE / LINK / AAVE / AVAX")
-    print("  🌐  Dashboard   : http://localhost:8765")
+    port = os.getenv("PORT", "8765")
+    print(f"  🌐  Dashboard   : http://0.0.0.0:{port}")
     print("  📱  Telegram    : @UnboundCycle12Bot")
     print("=" * 60 + "\n")
 

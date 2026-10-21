@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: everycryptobot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py --no-browser
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ALPACA_PAPER
+        value: "true"
+      - key: TELEGRAM_ENABLED
+        value: "true"
+      - key: RENDER
+        value: "true"
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
