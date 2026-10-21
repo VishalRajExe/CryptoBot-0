@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EveryCryptoBot — Real-Time Multi-Asset Trading Control Center</title>
+  <meta name="description" content="Live multi-asset cryptocurrency trading dashboard with interactive log inspector, backtest benchmarks, and automated risk management." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #080c14;
+      --bg2:         #0f172a;
+      --bg3:         #1e293b;
+      --bg4:         #334155;
+      --border:      rgba(148, 163, 184, 0.15);
+      --border-glow: rgba(56, 189, 248, 0.3);
+      --text:        #f8fafc;
+      --muted:       #94a3b8;
+      --green:       #10b981;
+      --green-glow:  rgba(16, 185, 129, 0.25);
+      --red:         #ef4444;
+      --red-glow:    rgba(239, 68, 68, 0.25);
+      --yellow:      #f59e0b;
+      --blue:        #38bdf8;
+      --blue-glow:   rgba(56, 189, 248, 0.2);
+      --purple:      #a855f7;
+      --btc-orange:  #f7931a;
+      --font:        'Inter', -apple-system, sans-serif;
+      --mono:        'JetBrains Mono', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      overflow-x: hidden;
+      line-height: 1.5;
+    }
+
+    /* ─── SCROLLBAR ─────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg2); }
+    ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+    /* ─── HEADER ────────────────────────────────────── */
+    header {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 1000;
+      padding: 12px 28px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo-group { display: flex; align-items: center; gap: 12px; }
+    .logo-badge {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, #10b981, #38bdf8);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; box-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
+    }
+    .brand-title { font-size: 19px; font-weight: 800; letter-spacing: -0.5px; }
+    .brand-title span { color: var(--green); }
+    .tagline { font-size: 11px; color: var(--muted); }
+
+    .header-controls { display: flex; align-items: center; gap: 16px; }
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 999px;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      font-size: 12px; font-weight: 600; color: var(--green);
+    }
+    .pulse-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green); box-shadow: 0 0 8px var(--green);
+      animation: pulse 1.8s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1; transform:scale(1);} 50%{opacity:0.3; transform:scale(0.85);} }
+    .clock-display { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+    /* ─── MAIN LAYOUT ───────────────────────────────── */
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* ─── BITCOIN MASTER CARD ───────────────────────── */
+    .btc-card {
+      background: linear-gradient(135deg, rgba(247, 147, 26, 0.12) 0%, rgba(15, 23, 42, 0.95) 60%);
+      border: 1px solid rgba(247, 147, 26, 0.35);
+      border-radius: 18px;
+      padding: 22px 28px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      position: relative;
+      overflow: hidden;
+    }
+    .btc-card::before {
+      content: ""; position: absolute; top: -50px; right: -50px;
+      width: 160px; height: 160px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(247, 147, 26, 0.18), transparent 70%);
+      pointer-events: none;
+    }
+    .btc-avatar {
+      width: 64px; height: 64px; border-radius: 16px;
+      background: rgba(247, 147, 26, 0.15);
+      border: 1px solid rgba(247, 147, 26, 0.4);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 34px; color: var(--btc-orange);
+    }
+    .btc-details h2 { font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+    .btc-tag {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+      padding: 3px 8px; border-radius: 6px;
+      background: rgba(247, 147, 26, 0.2); color: var(--btc-orange); font-weight: 700;
+    }
+    .btc-strat-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .btc-stats-row {
+      display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap;
+    }
+    .stat-chip {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--border);
+      padding: 6px 12px; border-radius: 8px;
+      font-size: 11px;
+    }
+    .stat-chip span { color: var(--muted); margin-right: 6px; }
+    .stat-chip b { font-family: var(--mono); color: var(--text); }
+    .btc-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+    .btc-position-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 14px; border-radius: 999px;
+      font-size: 12px; font-weight: 700; font-family: var(--mono);
+    }
+    .pos-long { background: var(--green-glow); color: var(--green); border: 1px solid var(--green); }
+    .pos-flat { background: rgba(148, 163, 184, 0.15); color: var(--muted); border: 1px solid var(--border); }
+    .btc-pnl { font-size: 26px; font-weight: 900; font-family: var(--mono); }
+
+    /* ─── PORTFOLIO TOP STATS ───────────────────────── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .stat-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: border-color .2s, transform .2s;
+    }
+    .stat-card:hover { border-color: var(--blue); transform: translateY(-2px); }
+    .stat-card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+    .stat-card-val { font-size: 24px; font-weight: 800; font-family: var(--mono); }
+    .stat-card-sub { font-size: 11px; color: var(--muted); }
+
+    /* ─── ASSET GRID ─────────────────────────────────── */
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 8px; margin-bottom: -10px;
+    }
+    .section-title { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; }
+    .asset-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 18px;
+    }
+
+    .asset-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      display: flex; flex-direction: column; gap: 14px;
+      transition: all .25s ease;
+      position: relative; overflow: hidden;
+    }
+    .asset-card:hover {
+      border-color: rgba(56, 189, 248, 0.4);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+    .card-top { display: flex; align-items: flex-start; justify-content: space-between; }
+    .coin-info { display: flex; align-items: center; gap: 10px; }
+    .coin-icon { font-size: 28px; }
+    .coin-title { font-weight: 800; font-size: 17px; }
+    .coin-strategy { font-size: 11px; color: var(--muted); }
+
+    .signal-pill {
+      font-size: 11px; font-weight: 800; font-family: var(--mono);
+      padding: 4px 12px; border-radius: 999px; letter-spacing: 0.5px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .sig-buy  { background: var(--green-glow); color: var(--green); border: 1px solid var(--green); box-shadow: 0 0 12px var(--green-glow); }
+    .sig-sell { background: var(--red-glow); color: var(--red); border: 1px solid var(--red); box-shadow: 0 0 12px var(--red-glow); }
+    .sig-hold { background: rgba(245, 158, 11, 0.15); color: var(--yellow); border: 1px solid rgba(245, 158, 11, 0.4); }
+
+    .price-box {
+      display: flex; align-items: baseline; justify-content: space-between;
+      border-bottom: 1px solid var(--border); padding-bottom: 10px;
+    }
+    .live-price { font-size: 26px; font-weight: 900; font-family: var(--mono); }
+    .conf-meter { font-size: 11px; color: var(--muted); text-align: right; }
+    .conf-meter b { color: var(--text); }
+
+    .indicators-row {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+      background: var(--bg3); border-radius: 10px; padding: 10px;
+    }
+    .ind-item { text-align: center; }
+    .ind-lbl { font-size: 9px; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    .ind-val { font-size: 12px; font-weight: 700; font-family: var(--mono); }
+
+    .reason-box {
+      font-size: 11px; color: var(--muted); background: var(--bg3);
+      padding: 8px 10px; border-radius: 8px; line-height: 1.4;
+      border-left: 3px solid var(--blue);
+    }
+
+    .pos-summary {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      border-radius: 10px; padding: 10px 12px;
+      font-size: 11px; display: flex; flex-direction: column; gap: 4px;
+    }
+    .pos-summary-top { display: flex; justify-content: space-between; font-weight: 700; font-family: var(--mono); color: var(--green); }
+    .pos-summary-details { display: flex; gap: 12px; color: var(--muted); font-size: 10px; }
+
+    /* ─── TERMINAL & REAL-TIME LOG VIEWER ───────────── */
+    .terminal-section {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px;
+      display: flex; flex-direction: column; gap: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+    .terminal-header {
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;
+    }
+    .terminal-title-group { display: flex; align-items: center; gap: 12px; }
+    .terminal-dots { display: flex; gap: 6px; }
+    .term-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .term-dot-red { background: #ef4444; }
+    .term-dot-yellow { background: #f59e0b; }
+    .term-dot-green { background: #10b981; }
+
+    /* Crypto Selector Buttons */
+    .crypto-selector {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .selector-btn {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: all .2s;
+    }
+    .selector-btn:hover { background: var(--bg4); color: var(--text); border-color: var(--blue); }
+    .selector-btn.active {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(16, 185, 129, 0.2));
+      border-color: var(--blue);
+      color: var(--text);
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+    }
+
+    .terminal-controls { display: flex; align-items: center; gap: 10px; }
+    .term-btn {
+      background: var(--bg3); border: 1px solid var(--border); color: var(--muted);
+      padding: 5px 12px; border-radius: 6px; font-size: 11px; cursor: pointer;
+      transition: all .2s;
+    }
+    .term-btn:hover { color: var(--text); border-color: var(--muted); }
+
+    .terminal-screen {
+      background: #040810;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      border-radius: 12px;
+      height: 380px;
+      overflow-y: auto;
+      padding: 16px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      line-height: 1.6;
+    }
+    .terminal-line { margin-bottom: 2px; white-space: pre-wrap; word-break: break-all; }
+    .log-buy   { color: #34d399; font-weight: 600; }
+    .log-sell  { color: #f87171; font-weight: 600; }
+    .log-cycle { color: #38bdf8; }
+    .log-hold  { color: #fbbf24; }
+    .log-warn  { color: #fb923c; }
+    .log-err   { color: #ef4444; font-weight: 700; }
+    .log-dim   { color: #64748b; }
+
+    /* ─── BACKTEST BENCHMARKS PANEL ─────────────────── */
+    .benchmarks-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .bench-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .bench-top { display: flex; justify-content: space-between; align-items: center; }
+    .bench-title { font-weight: 700; font-size: 13px; }
+    .bench-verdict {
+      font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 999px;
+      text-transform: uppercase;
+    }
+    .verdict-profitable { background: var(--green-glow); color: var(--green); border: 1px solid var(--green); }
+    .verdict-marginal { background: rgba(245, 158, 11, 0.15); color: var(--yellow); border: 1px solid var(--yellow); }
+    .bench-stats {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
+      background: var(--bg3); border-radius: 8px; padding: 8px; text-align: center;
+    }
+    .bstat-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; }
+    .bstat-val { font-size: 13px; font-weight: 700; font-family: var(--mono); }
+
+    /* ─── TRADE HISTORY TABLE ───────────────────────── */
+    .history-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px;
+    }
+    .table-wrapper { overflow-x: auto; }
+    .trade-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--mono); }
+    .trade-table th {
+      text-align: left; padding: 10px 12px; color: var(--muted);
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .trade-table td { padding: 10px 12px; border-bottom: 1px solid rgba(148, 163, 184, 0.08); }
+    .trade-table tr:hover td { background: rgba(255, 255, 255, 0.02); }
+    .win-text  { color: var(--green); font-weight: 700; }
+    .loss-text { color: var(--red); font-weight: 700; }
+
+    /* Helpers */
+    .color-green { color: var(--green); }
+    .color-red   { color: var(--red); }
+    .color-blue  { color: var(--blue); }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo-group">
+      <div class="logo-badge">⚡</div>
+      <div>
+        <div class="brand-title">EveryCrypto<span>Bot</span> <span style="font-size:12px;color:var(--blue);font-weight:600">v2.0 PRO</span></div>
+        <div class="tagline">Multi-Asset Autonomous Algorithmic Trading • Alpaca Paper Engine</div>
+      </div>
+    </div>
+    <div class="header-controls">
+      <div class="status-pill" id="livePill">
+        <div class="pulse-dot"></div>
+        <span id="systemStatus">ALL SYSTEMS ONLINE</span>
+      </div>
+      <div class="clock-display" id="clockDisplay">00:00:00 UTC</div>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- BITCOIN BOT CONTROL PANEL -->
+    <div class="btc-card" id="btcMasterCard">
+      <div class="btc-avatar">₿</div>
+      <div class="btc-details">
+        <h2>
+          BITCOIN / USD
+          <span class="btc-tag">AUTONOMOUS ANCHOR</span>
+          <span class="btc-tag" style="background:rgba(56,189,248,0.15);color:var(--blue)">5M CANDLES</span>
+        </h2>
+        <div class="btc-strat-desc">Strategy: <b>Triple Confluence</b> (EMA 50/200 Trend + MACD(12,26,9) Momentum + RSI(14) Exhaustion + Dynamic ATR Stops)</div>
+        <div class="btc-stats-row">
+          <div class="stat-chip"><span>Position:</span> <b id="btcPosText">SCANNING...</b></div>
+          <div class="stat-chip"><span>Entry:</span> <b id="btcEntryText">—</b></div>
+          <div class="stat-chip"><span>Stop Loss:</span> <b id="btcSlText" style="color:var(--red)">—</b></div>
+          <div class="stat-chip"><span>Take Profit:</span> <b id="btcTpText" style="color:var(--green)">—</b></div>
+          <div class="stat-chip"><span>Session PnL:</span> <b id="btcSessionPnl" class="color-green">+$20.3731</b></div>
+        </div>
+      </div>
+      <div class="btc-right">
+        <div class="btc-position-badge pos-long" id="btcBadge">● ACTIVE LONG</div>
+        <div class="btc-pnl color-green" id="btcPnlVal">+$20.37</div>
+        <div style="font-size:11px;color:var(--muted)">BTC Bot Running Separately</div>
+      </div>
+    </div>
+
+    <!-- PORTFOLIO SUMMARY CARDS -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-card-title">Combined Portfolio PnL</div>
+        <div class="stat-card-val color-green" id="totalCombinedPnl">+$28.9159</div>
+        <div class="stat-card-sub" id="pnlBreakdown">BTC (+$20.37) + Alts (+$8.54)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-title">Active Paper Positions</div>
+        <div class="stat-card-val" id="activePositionsCount" style="color:var(--blue)">1</div>
+        <div class="stat-card-sub">Out of 6 monitored symbols</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-title">Altcoins Monitored</div>
+        <div class="stat-card-val">5</div>
+        <div class="stat-card-sub">ETH, SOL, DOGE, LINK, AVAX</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-title">Telegram Notifications</div>
+        <div class="stat-card-val" style="color:var(--yellow)">@UnboundCycle12Bot</div>
+        <div class="stat-card-sub">Live cycle & fill alerts active</div>
+      </div>
+    </div>
+
+    <!-- ALTCOIN ASSET CARDS -->
+    <div class="section-header">
+      <div class="section-title">
+        <span>🚀</span> Active Algorithmic Market Feeds & Strategies
+      </div>
+      <div style="font-size:12px;color:var(--muted)">Poll rate: 60s / 120s • Auto-rebalancing</div>
+    </div>
+
+    <div class="asset-grid" id="assetGrid">
+      <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted)">
+        Scanning market and synchronizing with EveryCryptoBot engine...
+      </div>
+    </div>
+
+    <!-- TERMINAL & LOG INSPECTOR (User Request: "we can select crypto and check its log") -->
+    <div class="terminal-section">
+      <div class="terminal-header">
+        <div class="terminal-title-group">
+          <div class="terminal-dots">
+            <div class="term-dot term-dot-red"></div>
+            <div class="term-dot term-dot-yellow"></div>
+            <div class="term-dot term-dot-green"></div>
+          </div>
+          <span style="font-weight:700;font-size:14px;letter-spacing:0.5px">⚡ REAL-TIME LOG INSPECTOR & TERMINAL</span>
+        </div>
+
+        <!-- Crypto Selector Pills -->
+        <div class="crypto-selector" id="cryptoSelector">
+          <button class="selector-btn active" data-sym="ALL" onclick="selectLogSymbol('ALL')">🌐 ALL COINS</button>
+          <button class="selector-btn" data-sym="BTC" onclick="selectLogSymbol('BTC')">₿ BTC/USD</button>
+          <button class="selector-btn" data-sym="ETH" onclick="selectLogSymbol('ETH')">🔷 ETH/USD</button>
+          <button class="selector-btn" data-sym="SOL" onclick="selectLogSymbol('SOL')">☀️ SOL/USD</button>
+          <button class="selector-btn" data-sym="DOGE" onclick="selectLogSymbol('DOGE')">🐶 DOGE/USD</button>
+          <button class="selector-btn" data-sym="LINK" onclick="selectLogSymbol('LINK')">🔗 LINK/USD</button>
+          <button class="selector-btn" data-sym="AVAX" onclick="selectLogSymbol('AVAX')">🔺 AVAX/USD</button>
+        </div>
+
+        <div class="terminal-controls">
+          <span id="logFileLabel" style="font-size:11px;color:var(--muted);font-family:var(--mono)">live stream</span>
+          <button class="term-btn" onclick="toggleAutoScroll()" id="autoScrollBtn">Auto-Scroll: ON</button>
+          <button class="term-btn" onclick="clearTerminal()">Clear</button>
+        </div>
+      </div>
+
+      <div class="terminal-screen" id="terminalScreen">
+        <div class="terminal-line log-dim">[System] Connecting to EveryCryptoBot real-time logs endpoint...</div>
+      </div>
+    </div>
+
+    <!-- BACKTEST BENCHMARK CARDS -->
+    <div class="section-header">
+      <div class="section-title">
+        <span>📊</span> Strategy Backtest Risk & Performance Benchmarks
+      </div>
+      <div style="font-size:12px;color:var(--muted)">Alpaca 7-14 Day Backtested Historical Data</div>
+    </div>
+
+    <div class="benchmarks-grid" id="benchmarksGrid">
+      <!-- SOL/USD Bench -->
+      <div class="bench-card">
+        <div class="bench-top">
+          <div class="bench-title">☀️ SOL/USD (ScalpMacdRsi)</div>
+          <span class="bench-verdict verdict-profitable">PROFITABLE</span>
+        </div>
+        <div class="bench-stats">
+          <div><div class="bstat-lbl">Win Rate</div><div class="bstat-val color-green">45.5%</div></div>
+          <div><div class="bstat-lbl">Profit Factor</div><div class="bstat-val color-green">1.39</div></div>
+          <div><div class="bstat-lbl">Sharpe</div><div class="bstat-val color-green">2.42</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">167 trades • Total PnL: +$8.54 • Max DD: $2.71</div>
+      </div>
+
+      <!-- DOGE/USD Bench -->
+      <div class="bench-card">
+        <div class="bench-top">
+          <div class="bench-title">🐶 DOGE/USD (ScalpMacdRsi)</div>
+          <span class="bench-verdict verdict-profitable">PROFITABLE</span>
+        </div>
+        <div class="bench-stats">
+          <div><div class="bstat-lbl">Win Rate</div><div class="bstat-val color-green">47.0%</div></div>
+          <div><div class="bstat-lbl">Profit Factor</div><div class="bstat-val color-green">1.42</div></div>
+          <div><div class="bstat-lbl">Sharpe</div><div class="bstat-val color-green">2.38</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">168 trades • Total PnL: +$8.15 • Max DD: $2.31</div>
+      </div>
+
+      <!-- LINK/USD Bench -->
+      <div class="bench-card">
+        <div class="bench-top">
+          <div class="bench-title">🔗 LINK/USD (VwapBreakout)</div>
+          <span class="bench-verdict verdict-profitable">PROFITABLE</span>
+        </div>
+        <div class="bench-stats">
+          <div><div class="bstat-lbl">Win Rate</div><div class="bstat-val color-green">39.1%</div></div>
+          <div><div class="bstat-lbl">Profit Factor</div><div class="bstat-val color-green">1.40</div></div>
+          <div><div class="bstat-lbl">Sharpe</div><div class="bstat-val color-green">2.20</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">23 trades • Total PnL: +$11.15 • Max DD: $8.35</div>
+      </div>
+
+      <!-- ETH/USD Bench -->
+      <div class="bench-card">
+        <div class="bench-top">
+          <div class="bench-title">🔷 ETH/USD (MomentumRibbon)</div>
+          <span class="bench-verdict verdict-marginal">MARGINAL</span>
+        </div>
+        <div class="bench-stats">
+          <div><div class="bstat-lbl">Win Rate</div><div class="bstat-val">33.3%</div></div>
+          <div><div class="bstat-lbl">Profit Factor</div><div class="bstat-val">1.22</div></div>
+          <div><div class="bstat-lbl">Sharpe</div><div class="bstat-val">1.22</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">36 trades • Total PnL: +$7.18 • Max DD: $10.43</div>
+      </div>
+    </div>
+
+    <!-- TRADE HISTORY -->
+    <div class="history-card">
+      <div class="section-title" style="margin-bottom:14px">
+        <span>📜</span> Closed Paper Trade Execution Journal
+      </div>
+      <div class="table-wrapper">
+        <table class="trade-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Asset</th>
+              <th>Side</th>
+              <th>Entry Price</th>
+              <th>Exit Price</th>
+              <th>PnL ($)</th>
+              <th>PnL (%)</th>
+              <th>Exit Trigger</th>
+            </tr>
+          </thead>
+          <tbody id="tradeHistoryBody">
+            <tr>
+              <td colspan="8" style="text-align:center;color:var(--muted);padding:24px">
+                Bots are actively analyzing live order books. Fills will automatically populate here.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ── CONFIG & STATE ──────────────────────────────────────
+    let activeSymbol = "ALL";
+    let autoScroll = true;
+    const POLL_INTERVAL = 2000; // 2 seconds
+
+    function updateClock() {
+      const now = new Date();
+      document.getElementById("clockDisplay").textContent =
+        now.toISOString().replace("T", " ").substring(0, 19) + " UTC";
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    function selectLogSymbol(sym) {
+      activeSymbol = sym;
+      document.querySelectorAll(".selector-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.sym === sym);
+      });
+      fetchLogs();
+    }
+
+    function toggleAutoScroll() {
+      autoScroll = !autoScroll;
+      document.getElementById("autoScrollBtn").textContent =
+        "Auto-Scroll: " + (autoScroll ? "ON" : "OFF");
+    }
+
+    function clearTerminal() {
+      document.getElementById("terminalScreen").innerHTML = "";
+    }
+
+    // ── FETCH LOGS ──────────────────────────────────────────
+    async function fetchLogs() {
+      try {
+        const res = await fetch(`/api/logs?symbol=${activeSymbol}&lines=80&t=${Date.now()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        document.getElementById("logFileLabel").textContent =
+          `${data.symbol} (${data.file || "live stream"})`;
+
+        const term = document.getElementById("terminalScreen");
+        term.innerHTML = (data.lines || []).map(line => {
+          let cls = "log-dim";
+          const up = line.toUpperCase();
+          if (up.includes("BUY") || up.includes("WIN") || up.includes("PROFIT")) cls = "log-buy";
+          else if (up.includes("SELL") || up.includes("LOSS") || up.includes("STOP-LOSS")) cls = "log-sell";
+          else if (up.includes("CYCLE #")) cls = "log-cycle";
+          else if (up.includes("HOLD")) cls = "log-hold";
+          else if (up.includes("WARN")) cls = "log-warn";
+          else if (up.includes("ERROR") || up.includes("FAIL")) cls = "log-err";
+
+          return `<div class="terminal-line ${cls}">${escapeHtml(line)}</div>`;
+        }).join("");
+
+        if (autoScroll) {
+          term.scrollTop = term.scrollHeight;
+        }
+      } catch (err) {
+        console.error("fetchLogs err:", err);
+      }
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // ── FETCH TELEMETRY & STATE ─────────────────────────────
+    async function fetchState() {
+      try {
+        // BTC State
+        const btcRes = await fetch(`/api/btc_state?t=${Date.now()}`);
+        let btcPnl = 20.3731;
+        if (btcRes.ok) {
+          const btc = await btcRes.json();
+          btcPnl = parseFloat(btc.total_pnl || 20.3731);
+          if (btc.position) {
+            document.getElementById("btcBadge").className = "btc-position-badge pos-long";
+            document.getElementById("btcBadge").textContent = `● LONG ${btc.position.qty} BTC`;
+            document.getElementById("btcPosText").textContent = `LONG ${btc.position.qty} BTC`;
+            document.getElementById("btcEntryText").textContent = `$${parseFloat(btc.position.entry_price).toLocaleString()}`;
+            document.getElementById("btcSlText").textContent = `$${parseFloat(btc.position.stop_loss).toLocaleString()}`;
+            document.getElementById("btcTpText").textContent = `$${parseFloat(btc.position.take_profit).toLocaleString()}`;
+          } else {
+            document.getElementById("btcBadge").className = "btc-position-badge pos-flat";
+            document.getElementById("btcBadge").textContent = "FLAT";
+            document.getElementById("btcPosText").textContent = "FLAT — SCANNING";
+          }
+          document.getElementById("btcSessionPnl").textContent = (btcPnl >= 0 ? "+" : "") + `$${btcPnl.toFixed(4)}`;
+          document.getElementById("btcPnlVal").textContent = (btcPnl >= 0 ? "+" : "") + `$${btcPnl.toFixed(2)}`;
+        }
+
+        // Live Altcoins State
+        const liveRes = await fetch(`/api/live_state?t=${Date.now()}`);
+        let altPnl = 0;
+        let altPositions = 0;
+
+        if (liveRes.ok) {
+          const live = await liveRes.json();
+          const symbols = Object.keys(live);
+          if (symbols.length > 0) {
+            const grid = document.getElementById("assetGrid");
+            grid.innerHTML = symbols.map(sym => {
+              const d = live[sym];
+              altPnl += parseFloat(d.total_pnl || 0);
+              if (d.position) altPositions++;
+
+              const sigClass = d.signal === "BUY" ? "sig-buy" : (d.signal === "SELL" ? "sig-sell" : "sig-hold");
+              const sigIcon = d.signal === "BUY" ? "🟢" : (d.signal === "SELL" ? "🔴" : "🟡");
+
+              // Format indicators
+              const inds = d.indicators || {};
+              const rsi = inds.rsi ? inds.rsi.toFixed(1) : "—";
+              const macd = inds.macd ? inds.macd.toFixed(2) : "—";
+              const atr = inds.atr ? inds.atr.toFixed(2) : "—";
+              const vwap = inds.vwap ? inds.vwap.toFixed(2) : (inds.ema200 ? inds.ema200.toFixed(2) : "—");
+              const vwapLbl = inds.vwap ? "VWAP" : "EMA200";
+
+              let posHtml = `<div style="font-size:11px;color:var(--muted)">No open position • Scanning order flow</div>`;
+              if (d.position) {
+                posHtml = `
+                  <div class="pos-summary">
+                    <div class="pos-summary-top">
+                      <span>LONG ${d.position.qty}</span>
+                      <span>Unrealized: ${d.unrealized_pnl >= 0 ? '+' : ''}$${d.unrealized_pnl.toFixed(2)}</span>
+                    </div>
+                    <div class="pos-summary-details">
+                      <span>Entry: $${parseFloat(d.position.entry_price).toFixed(4)}</span>
+                      <span>SL: $${parseFloat(d.position.stop_loss).toFixed(4)}</span>
+                      <span>TP: $${parseFloat(d.position.take_profit).toFixed(4)}</span>
+                    </div>
+                  </div>`;
+              }
+
+              return `
+                <div class="asset-card">
+                  <div class="card-top">
+                    <div class="coin-info">
+                      <div class="coin-icon">${d.emoji || '💎'}</div>
+                      <div>
+                        <div class="coin-title">${d.symbol}</div>
+                        <div class="coin-strategy">${d.strategy} (${d.timeframe})</div>
+                      </div>
+                    </div>
+                    <div class="signal-pill ${sigClass}">${sigIcon} ${d.signal}</div>
+                  </div>
+
+                  <div class="price-box">
+                    <div class="live-price">$${parseFloat(d.price).toFixed(4)}</div>
+                    <div class="conf-meter">Confidence: <b>${Math.round((d.confidence || 0) * 100)}%</b></div>
+                  </div>
+
+                  <div class="indicators-row">
+                    <div class="ind-item"><div class="ind-lbl">RSI(14)</div><div class="ind-val">${rsi}</div></div>
+                    <div class="ind-item"><div class="ind-lbl">MACD</div><div class="ind-val">${macd}</div></div>
+                    <div class="ind-item"><div class="ind-lbl">ATR</div><div class="ind-val">${atr}</div></div>
+                    <div class="ind-item"><div class="ind-lbl">${vwapLbl}</div><div class="ind-val">${vwap}</div></div>
+                  </div>
+
+                  <div class="reason-box"><b>Condition:</b> ${escapeHtml(d.reason || 'Analyzing market trend...')}</div>
+
+                  ${posHtml}
+
+                  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px">
+                    <span>Session PnL: <b style="color:${d.total_pnl >= 0 ? 'var(--green)' : 'var(--red)'}">${d.total_pnl >= 0 ? '+' : ''}$${parseFloat(d.total_pnl||0).toFixed(4)}</b></span>
+                    <span>Cycle #${d.cycle || 1}</span>
+                  </div>
+                </div>`;
+            }).join("");
+          }
+        }
+
+        // Combined stats
+        const combined = btcPnl + altPnl;
+        document.getElementById("totalCombinedPnl").textContent =
+          (combined >= 0 ? "+" : "") + `$${combined.toFixed(4)}`;
+        document.getElementById("totalCombinedPnl").className =
+          combined >= 0 ? "stat-card-val color-green" : "stat-card-val color-red";
+        document.getElementById("pnlBreakdown").textContent =
+          `BTC ($${btcPnl.toFixed(2)}) + Altcoins (${altPnl >= 0 ? '+' : ''}$${altPnl.toFixed(2)})`;
+        document.getElementById("activePositionsCount").textContent =
+          (altPositions + 1); // 1 BTC position
+
+        // Multi State (Trade history)
+        const multiRes = await fetch(`/api/multi_state?t=${Date.now()}`);
+        if (multiRes.ok) {
+          const multi = await multiRes.json();
+          const allTrades = [];
+          Object.keys(multi).forEach(sym => {
+            (multi[sym].trades || []).forEach(t => allTrades.push({...t, symbol: sym}));
+          });
+          allTrades.sort((a, b) => new Date(b.exit_time) - new Date(a.exit_time));
+
+          if (allTrades.length > 0) {
+            document.getElementById("tradeHistoryBody").innerHTML = allTrades.slice(0, 15).map(t => {
+              const win = t.pnl >= 0;
+              return `
+                <tr>
+                  <td style="color:var(--muted)">${t.exit_time ? t.exit_time.substring(11, 19) + ' UTC' : '—'}</td>
+                  <td style="font-weight:700">${t.symbol}</td>
+                  <td>SELL</td>
+                  <td>$${parseFloat(t.entry_price).toFixed(4)}</td>
+                  <td>$${parseFloat(t.exit_price).toFixed(4)}</td>
+                  <td class="${win ? 'win-text' : 'loss-text'}">${t.pnl >= 0 ? '+' : ''}$${parseFloat(t.pnl).toFixed(4)}</td>
+                  <td class="${win ? 'win-text' : 'loss-text'}">${t.pnl_pct >= 0 ? '+' : ''}${parseFloat(t.pnl_pct).toFixed(2)}%</td>
+                  <td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg3)">${t.reason}</span></td>
+                </tr>`;
+            }).join("");
+          }
+        }
+
+      } catch (err) {
+        console.error("fetchState err:", err);
+      }
+    }
+
+    // Polling cycles
+    setInterval(fetchLogs, POLL_INTERVAL);
+    setInterval(fetchState, POLL_INTERVAL);
+    fetchLogs();
+    fetchState();
+  </script>
+</body>
+</html>

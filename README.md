@@ -1,123 +1,118 @@
 # EveryCryptoBot 🚀
 
-An automated algorithmic cryptocurrency trading bot built for **Alpaca Trading API** (Paper & Live) with real-time **Telegram notifications** and a proven **Triple Confluence Strategy**.
+An autonomous, multi-asset algorithmic cryptocurrency trading and paper-trading engine built for the **Alpaca Trading API** with real-time **Telegram bot alerts**, interactive **web dashboard**, **crypto log inspector**, and a modular **backtesting engine**.
 
 ---
 
-## 📌 Strategy Overview
+## 📌 Architecture & Supported Assets
 
-The bot operates on a **Triple Confluence Strategy** designed to filter out market noise and trade high-probability momentum breakouts:
+EveryCryptoBot runs dedicated algorithmic strategies tailored to each asset's volatility and liquidity characteristics:
 
-```
-                  ┌──────────────────────────────┐
-                  │       MARKET CANDLES         │
-                  └──────────────┬───────────────┘
-                                 │
-         ┌───────────────────────┼───────────────────────┐
-         ▼                       ▼                       ▼
-┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-│   TREND FILTER   │   │ MOMENTUM TRIGGER │   │ EXHAUSTION FILTER│
-│   EMA 50 > EMA 200│   │ MACD Crossover   │   │ RSI Sweet Spot   │
-└────────┬─────────┘   └─────────┬────────┘   └─────────┬────────┘
-         │                       │                      │
-         └───────────────────────┼──────────────────────┘
-                                 │
-                        [ ALL 3 ALIGNED? ]
-                                 │
-                       YES ──────┴────── NO
-                        │                 │
-                        ▼                 ▼
-                  [ EXECUTE BUY ]      [ HOLD ]
-```
+| Asset | Timeframe | Strategy | Characteristics | Risk/Reward |
+| :--- | :--- | :--- | :--- | :--- |
+| **BTC/USD** | 5-min | **Triple Confluence** | EMA 50/200 + MACD momentum + RSI exhaustion filter | Dynamic ATR Stop, 1:2 R:R |
+| **SOL/USD** | 1-min | **ScalpMacdRsi** | High-frequency momentum scalping with EMA 200 trend anchor | 1.0% SL, 1.5% TP |
+| **DOGE/USD** | 1-min | **ScalpMacdRsi** | Rapid volatility scalping on meme momentum surges | 1.0% SL, 1.5% TP |
+| **LINK/USD** | 15-min | **VwapBreakout** | Institutional anchored VWAP breakout with volume surge | 1.5% SL, 3.0% TP |
+| **ETH/USD** | 5-min | **MomentumEmaRibbon** | Trend-riding across 8/13/21/55 EMA ribbon expansion | 2x ATR trailing stop |
+| **AVAX/USD** | 5-min | **MomentumEmaRibbon** | Intraday trend breakout & EMA expansion | 2x ATR trailing stop |
 
-### 1. Buy Conditions (All 3 Must Align)
-- **Trend Filter**: Price > EMA(50) > EMA(200) *(Confirmed Bullish Trend)*
-- **Momentum Trigger**: MACD Line crosses above Signal Line *(Bullish Momentum Crossover)*
-- **Exhaustion Filter**: RSI(14) between 50 and 70 *(Bullish control without being overbought)*
+---
 
-### 2. Sell / Exit Conditions
-- **Dynamic Stop-Loss**: $1.5 \times \text{ATR}(14)$ below entry price *(adapts dynamically to volatility)*
-- **Take-Profit Target**: $2.0 \times \text{Risk}$ *(positive 1:2 Risk-to-Reward ratio)*
-- **Trend Invalidation**: Bearish confluence crossover triggers early protection
+## 🖥️ Live Dashboard & Real-Time Log Viewer
+
+EveryCryptoBot features a dark-themed control center running at `http://localhost:8765`:
+
+- **Interactive Crypto Log Inspector**: Filter and view live terminal logs by crypto symbol (`[ALL]` `[BTC]` `[ETH]` `[SOL]` `[DOGE]` `[LINK]` `[AVAX]`) in real-time with auto-scroll and color-coded signals.
+- **Bitcoin Master Banner**: Live position monitoring, entry price, trailing stops, and realized/unrealized PnL.
+- **Active Asset Grid**: Real-time prices, live technical indicators (RSI, MACD, ATR, VWAP), confidence meters, and buy/sell/hold badges.
+- **Backtest Benchmarks Panel**: Direct side-by-side comparison between backtested win rates / profit factors and live performance.
+- **Execution History Table**: Chronological journal of fills with entry, exit, PnL ($ and %), and exit triggers.
 
 ---
 
 ## 📱 Telegram Notifications
 
-The bot sends formatted real-time updates directly to your Telegram chat:
-
-- **🟢 Buy Alert**: Quantity, Entry Price, Stop-Loss, Take-Profit, and Risk/Reward ratio.
-- **🎯 Take-Profit / 🛑 Stop-Loss Alert**: Exit Price, Realized PnL ($ and %), and cumulative session stats.
-- **🟡 Cycle Report**: Polled market snapshot every cycle with Price, RSI, MACD, Trend, and live Unrealized PnL.
-
----
-
-## ⚙️ Project Structure
-
-```
-EveryCryptoBot/
-├── bot.py             # Main bot engine & indicator computations
-├── requirements.txt   # Python dependencies
-├── .env.example       # Template for environment credentials
-├── .gitignore         # Git ignore rules (protects credentials and logs)
-└── README.md          # Documentation
-```
+Integrated Telegram alerts with HTML formatting:
+- **🟢 Buy Orders**: Asset, quantity, entry price, stop-loss, and take-profit targets.
+- **🎯 Take-Profit / 🛑 Stop-Loss**: Exit price, realized PnL ($ and %), and updated session total.
+- **📊 Cycle Telemetry**: Polled technical indicator status, trend conditions, and unrealized positions.
 
 ---
 
-## 🚀 Getting Started
+## 🧪 Backtesting Engine
 
-### 1. Clone the Repository
+Run historical simulations against Alpaca historical market data:
+
 ```bash
-git clone https://github.com/VishalRajExe/EveryCryptoBot.git
-cd EveryCryptoBot
+# Backtest SOL/USD 1-minute scalping over 7 days
+python backtest.py --symbol SOL/USD --strategy ScalpMacdRsi --days 7 --stake 300
+
+# Backtest ETH/USD 5-minute ribbon over 14 days
+python backtest.py --symbol ETH/USD --strategy MomentumEmaRibbon --days 14 --stake 500
+
+# Backtest LINK/USD 15-minute VWAP breakout over 14 days
+python backtest.py --symbol LINK/USD --strategy VwapBreakout --days 14 --stake 300
 ```
 
-### 2. Install Dependencies
+Results are saved to `backtests/<symbol>_<strategy>_<days>d.json` with Win Rate, Profit Factor, Sharpe Ratio, and Drawdowns.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Requirements
+- Python 3.9+
+- Alpaca API Paper or Live credentials
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure Credentials
+### 2. Configure Credentials
 Copy `.env.example` to `.env` and fill in your keys:
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
 ```ini
-# Alpaca Trading API Credentials
-ALPACA_API_KEY=your_alpaca_key
-ALPACA_SECRET_KEY=your_alpaca_secret
+ALPACA_API_KEY=your_key_here
+ALPACA_SECRET_KEY=your_secret_here
 ALPACA_PAPER=true
 
-# Trading Settings
-TRADING_SYMBOL=BTC/USD
-STAKE_USD=5000.0
-POLL_SECS=60
-CANDLE_LIMIT=250
-
-# Telegram Bot Notifications
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_CHAT_ID=your_telegram_chat_id
+TELEGRAM_CHAT_ID=your_chat_id
 TELEGRAM_ENABLED=true
 ```
 
-### 4. Run the Bot
+### 3. Launch System
 ```bash
-python bot.py
+# Start all altcoin bots and live dashboard:
+python run.py
+
+# Run headless (no browser auto-open):
+python run.py --no-browser
+
+# Run a single asset bot:
+python multi_bot.py --symbol SOL/USD
 ```
 
 ---
 
-## 🛡️ Risk Management
+## 📂 Project Structure
 
-- **Dynamic Position Sizing**: Stakes a fixed dollar amount per trade (e.g. $5,000 USD).
-- **Hard Volatility Bounds**: Dynamic ATR stop-loss ensures trades are cut before large pullbacks.
-- **Persistent State**: Open positions, trades, and PnL are persisted to `alpaca_state.json` to safely survive process restarts.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+```
+EveryCryptoBot/
+├── backtest.py           # Historical backtesting engine
+├── backtests/            # Backtest benchmark reports (.json)
+├── dashboard/
+│   ├── index.html        # Real-time web control center
+│   └── live_state.json   # Live telemetry state feed
+├── dashboard_server.py   # HTTP API & log streaming server
+├── multi_bot.py          # Multi-asset threaded trading engine
+├── run.py                # Master launcher
+├── strategies/
+│   ├── base.py           # BaseStrategy abstract interface
+│   ├── momentum_ema_ribbon.py
+│   ├── scalp_macd_rsi.py
+│   └── vwap_breakout.py
+├── requirements.txt      # Python dependencies
+├── .env.example          # Environment template
+└── README.md             # Documentation
+```

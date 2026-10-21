@@ -19,6 +19,8 @@ ENV/
 logs/
 *.log
 alpaca_state.json
+multi_state.json
+dashboard/live_state.json
 
 # IDE / OS files
 .vscode/
