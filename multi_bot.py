@@ -64,45 +64,52 @@ BASE_STAKE_USD = float(os.getenv("STAKE_USD_ALT", "25.0"))   # baseline micro st
 
 # Asset → Strategy mapping (Calibrated for Maximum Win Rate & Profit Factor)
 ASSET_CONFIG = {
+    "BTC/USD": {
+        "strategy": ScalpMacdRsi,      # 1-minute turbo scalping on Bitcoin anchor
+        "timeframe_minutes": 1,
+        "poll_secs": 20,
+        "days_history": 2,
+        "emoji": "₿",
+    },
     "ETH/USD": {
         "strategy": BinHCluc,          # Proven 2.59 PF / 6.20 Sharpe on Ethereum
         "timeframe_minutes": 5,
-        "poll_secs": 60,
+        "poll_secs": 35,
         "days_history": 4,
         "emoji": "🔷",
     },
     "SOL/USD": {
         "strategy": ScalpMacdRsi,      # 1.39 PF / 2.42 Sharpe on Solana micro-momentum
         "timeframe_minutes": 1,
-        "poll_secs": 60,
+        "poll_secs": 25,
         "days_history": 2,
         "emoji": "☀️",
     },
     "DOGE/USD": {
         "strategy": ScalpMacdRsi,      # 1.42 PF / 2.38 Sharpe on meme volatility surges
         "timeframe_minutes": 1,
-        "poll_secs": 60,
+        "poll_secs": 25,
         "days_history": 2,
         "emoji": "🐶",
     },
     "LINK/USD": {
         "strategy": VwapBreakout,      # 1.40 PF / 2.20 Sharpe on anchored VWAP expansion
-        "timeframe_minutes": 15,
-        "poll_secs": 120,
+        "timeframe_minutes": 5,
+        "poll_secs": 45,
         "days_history": 4,
         "emoji": "🔗",
     },
     "AAVE/USD": {
         "strategy": VwapBreakout,      # 1.46 PF / 2.61 Sharpe on DeFi momentum breakout
-        "timeframe_minutes": 15,
-        "poll_secs": 120,
+        "timeframe_minutes": 5,
+        "poll_secs": 45,
         "days_history": 4,
         "emoji": "👻",
     },
     "AVAX/USD": {
         "strategy": MomentumEmaRibbon, # 1.20 PF on Avalanche intraday expansion
         "timeframe_minutes": 5,
-        "poll_secs": 60,
+        "poll_secs": 35,
         "days_history": 4,
         "emoji": "🔺",
     },
@@ -194,6 +201,23 @@ def update_dashboard(symbol: str, data: dict):
         except Exception:
             pass
 
+        # If BTC/USD, also synchronize alpaca_state.json for the master Bitcoin panel
+        if symbol == "BTC/USD":
+            try:
+                btc_data = {
+                    "position": data.get("position"),
+                    "trades": [],
+                    "total_pnl": data.get("total_pnl", 0.0)
+                }
+                for path in [
+                    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "user_data", "alpaca_state.json")),
+                    os.path.join(os.path.dirname(__file__), "alpaca_state.json")
+                ]:
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(btc_data, f, indent=2, default=str)
+            except Exception:
+                pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  ASSET BOT WORKER
@@ -277,21 +301,30 @@ class AssetBot:
     def calculate_stake(self) -> float:
         """
         Micro-account dynamic stake calculator:
-        Designed for a $100 starting balance compounding to $10,000.
-        Dynamically divides available cash into slots (max 3 concurrent positions)
-        and scales up geometrically with equity growth.
+        Designed for $100 starting balance compounding to achieve $50 profit.
+        Supports multi-asset concurrent trading (up to 3 concurrent slots)
+        across all trained assets (BTC, ETH, SOL, DOGE, LINK, AAVE, AVAX).
         """
         cash = self.get_cash()
-        reserve = max(10.0, cash * 0.15)
+        reserve = max(2.0, cash * 0.05)
         available = max(0.0, cash - reserve)
 
         active_positions = self.memory.get_active_positions()
-        slots = max(1, 3 - len(active_positions))
+        num_pos = len(active_positions)
+        if num_pos >= 3:
+            return 0.0
+
+        slots = max(1, 3 - num_pos)
         target = available / slots
 
         risk_mult = self.memory.get_risk_multiplier(self.symbol)
-        max_allowed = max(10.0, cash * 0.35)
-        stake = min(max(target * risk_mult, 10.0), max_allowed)
+        raw_stake = target * risk_mult
+
+        MIN_ORDER_USD = 10.50
+        if available >= MIN_ORDER_USD:
+            stake = min(max(raw_stake, MIN_ORDER_USD), min(available, 45.0))
+        else:
+            stake = 0.0
         return round(stake, 2)
 
     def get_adaptive_timeframe(self, df: pd.DataFrame, price: float) -> Tuple[TimeFrame, int, str]:
@@ -327,11 +360,11 @@ class AssetBot:
             self.log.warning("⏸️ COOL-DOWN ACTIVE: Skipping BUY on %s after consecutive losses.", self.symbol)
             return False
 
-        # Micro-account dynamic position sizing
+        # Micro-account dynamic position sizing (Alpaca minimum crypto order is $10.00)
         active_stake = self.calculate_stake()
         cash = self.get_cash()
-        if cash < active_stake or active_stake < 5.0:
-            self.log.warning("Insufficient cash $%.2f for active stake $%.2f", cash, active_stake)
+        if cash < active_stake or active_stake < 10.0:
+            self.log.warning("Insufficient cash $%.2f for minimum order $%.2f", cash, active_stake)
             return False
 
         qty = round(active_stake / price, 6)
@@ -421,17 +454,17 @@ class AssetBot:
         pnl_pct = ((price - ep) / ep * 100.0) if ep > 0 else 0.0
         atr = float(features.get("atr", 1.0))
 
-        # 1. Breakeven Lock: Once trade reaches +1.5% profit, raise SL to entry + 0.2% (fee coverage)
-        be_target = round(ep * 1.002, 4)
-        if pnl_pct >= 1.5 and sl < be_target:
+        # 1. Breakeven Lock: Once trade reaches +0.40% profit, raise SL to entry + 0.05%
+        be_target = round(ep * 1.0005, 4)
+        if pnl_pct >= 0.40 and sl < be_target:
             self.memory.update_stop_loss(self.symbol, be_target)
             self.log.info("🛡️ BREAKEVEN ACTIVATED on %s: Raised SL to $%.4f (Gain: +%.2f%%)",
                           self.symbol, be_target, pnl_pct)
             sl = be_target
 
-        # 2. Dynamic Trailing Stop: Once trade reaches +2.5% profit, trail SL at (price - 1.2 * atr)
-        if pnl_pct >= 2.5:
-            trail_sl = round(price - (1.2 * atr), 4)
+        # 2. Dynamic Trailing Stop: Once trade reaches +0.80% profit, trail peak by 0.8x ATR
+        if pnl_pct >= 0.80 and atr > 0:
+            trail_sl = round(price - (0.8 * atr), 4)
             if trail_sl > sl:
                 self.memory.update_stop_loss(self.symbol, trail_sl)
                 self.log.info("📈 TRAILING STOP UPDATED on %s: Raised SL to $%.4f (Gain: +%.2f%%)",
@@ -554,41 +587,39 @@ class AssetBot:
                         self.sell(price, reason="sell_signal", features=features)
                     elif result.signal == "BUY" and has_pos:
                         self.log.info("BUY signal confirmed – holding active position.")
-                    elif result.signal == "SELL" and not has_pos:
-                        self.log.info("SELL signal – no open position to close.")
                     else:
-                        self.log.info("HOLD – market scanning in progress.")
+                        self.log.debug("No action required for %s", self.symbol)
+
+                time.sleep(self.poll)
 
             except Exception as e:
-                self.log.error("Loop error: %s", e, exc_info=True)
+                self.log.error("Error in %s cycle %d: %s", self.symbol, cycle, e, exc_info=True)
+                time.sleep(self.poll)
 
-            time.sleep(self.poll)
-
-    # ── Telegram Notifications ───────────────────────────────────────────────
     def _notify_startup(self):
-        risk_mult = self.memory.get_risk_multiplier(self.symbol)
         send_telegram(
-            f"{self.emoji} <b>{self.symbol} Bot ONLINE (Persistent)</b>\n"
+            f"{self.emoji} <b>ENGINE LAUNCHED — {self.symbol}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📈 <b>Strategy:</b> {html.escape(self.strategy.NAME)}\n"
-            f"⏱️ <b>Timeframe:</b> {self.tf_min}-min | Poll: {self.poll}s\n"
-            f"🧠 <b>Memory:</b> SQLite WAL Mode Active\n"
-            f"🎯 <b>Adaptive Risk:</b> {risk_mult:.2f}x (${BASE_STAKE_USD * risk_mult:,.2f})\n"
+            f"📊 <b>Strategy:</b> {html.escape(self.strategy.NAME)}\n"
+            f"⏱️ <b>Timeframe:</b> {self.tf_min}m (Poll: {self.poll}s)\n"
+            f"🧠 <b>Memory:</b> SQLite WAL active\n"
+            f"🤖 <b>AI Learner:</b> Online Random Forest Guard\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕒 <i>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>"
+            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
     def _notify_buy(self, qty: float, price: float, sl: float, tp: float, stake: float, risk_mult: float):
-        risk   = price - sl
+        risk = price - sl
         reward = tp - price
+        rr = (reward / risk) if risk > 0 else 0.0
         send_telegram(
-            f"{self.emoji} 🟢 <b>BUY ORDER FILLED — {self.symbol}</b>\n"
+            f"🟢 <b>BUY EXECUTED — {self.symbol}</b> {self.emoji}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 <b>Strategy:</b> {html.escape(self.strategy.NAME)}\n"
-            f"🔢 <b>Qty:</b> <code>{qty:.6f}</code> (~${stake:,.2f} | {risk_mult:.2f}x stake)\n"
-            f"💵 <b>Entry Price:</b> <b>${price:,.4f}</b>\n"
+            f"🔢 <b>Qty:</b> <code>{qty:.6f}</code> | 💵 <b>Stake:</b> ${stake:,.2f} (Risk: {risk_mult:.2f}x)\n"
+            f"💵 <b>Fill Price:</b> ${price:,.4f}\n"
             f"🛑 <b>Stop Loss:</b> ${sl:,.4f} (-${risk:,.2f})\n"
-            f"🎯 <b>Take Profit:</b> ${tp:,.4f} (+${reward:,.2f})\n"
+            f"🎯 <b>Take Profit:</b> ${tp:,.4f} (+${reward:,.2f}) [R:R {rr:.2f}]\n"
             f"🧠 <b>Memory:</b> Synced with SQLite & Alpaca\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
@@ -601,6 +632,8 @@ class AssetBot:
             "stop_loss":   f"🛑 <b>STOP LOSS HIT — {self.symbol}</b> ⚠️",
         }.get(reason, f"🔴 <b>SELL EXECUTED — {self.symbol}</b>")
 
+        total_pnl = self.memory.get_total_realized_pnl()
+        progress_pct = max(0.0, min(100.0, (total_pnl / 50.0) * 100))
         cool_line = f"\n⏸️ <b>Cool-down Activated:</b> 20 mins" if learning.get("cooldown_until") else ""
         send_telegram(
             f"{hdr}\n"
@@ -612,16 +645,25 @@ class AssetBot:
             f"{'✅ WIN' if pnl>=0 else '❌ LOSS'}\n"
             f"🧠 <b>AI Adaptation:</b> Consec Losses: {learning['consecutive_losses']} | Risk Mult: {learning['risk_multiplier']:.2f}x{cool_line}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 <b>$50 GOAL PROGRESS:</b>\n"
+            f"  • <b>Total Realized Profit:</b> <b>{'+' if total_pnl >= 0 else ''}${total_pnl:,.4f}</b> / <b>+$50.00</b> ({progress_pct:.1f}%)\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
     def _notify_cycle(self, cycle: int, price: float, result, pos, unreal: float, win_prob: float, risk_mult: float):
+        # Notify on cycle 1, when in position, or every 10 cycles to keep Telegram clean
+        if cycle != 1 and not pos and (cycle % 10 != 0):
+            return
+
         sig_icon = {"BUY": "🟢", "SELL": "🔴"}.get(result.signal, "🟡")
         pos_line = (
             f"💼 LONG <code>{pos['qty']:.6f}</code> @ ${pos['entry_price']:,.4f} | "
             f"Unreal: {'+'if unreal>=0 else ''}${unreal:,.2f}"
             if pos else "💼 FLAT"
         )
+        total_pnl = self.memory.get_total_realized_pnl()
+        progress_pct = max(0.0, min(100.0, (total_pnl / 50.0) * 100))
+
         send_telegram(
             f"{self.emoji} <b>CYCLE #{cycle} — {self.symbol}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -630,6 +672,7 @@ class AssetBot:
             f"📊 <i>{html.escape(result.reason)}</i>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"{pos_line}\n"
+            f"🎯 <b>$50 Goal Progress:</b> {'+' if total_pnl >= 0 else ''}${total_pnl:,.4f} / +$50.00 ({progress_pct:.1f}%)\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 

@@ -181,6 +181,21 @@ class TradeMemory:
                 # Bot restarted while in a trade! Reconstruct position in memory
                 sl = round(entry_price * (1 - fallback_sl_pct), 4)
                 tp = round(entry_price * (1 + fallback_tp_pct), 4)
+
+                # Check if alpaca_state.json has calibrated SL/TP for BTC/USD
+                if symbol == "BTC/USD":
+                    try:
+                        state_path = os.path.join(os.path.dirname(__file__), "alpaca_state.json")
+                        if os.path.exists(state_path):
+                            with open(state_path, "r", encoding="utf-8") as f:
+                                btc_state = json.load(f)
+                            pos_info = btc_state.get("position")
+                            if pos_info and pos_info.get("stop_loss"):
+                                sl = float(pos_info["stop_loss"])
+                                tp = float(pos_info.get("take_profit", tp))
+                    except Exception:
+                        pass
+
                 log.warning("🔄 RECOVERED ORPHAN POSITION on %s: Qty=%.6f @ $%.4f. Setting SL=$%.4f TP=$%.4f",
                             symbol, qty, entry_price, sl, tp)
                 self.save_position(
@@ -190,7 +205,7 @@ class TradeMemory:
                     entry_price=entry_price,
                     stop_loss=sl,
                     take_profit=tp,
-                    strategy="RecoveredPosition"
+                    strategy="ScalpMacdRsi" if symbol == "BTC/USD" else "RecoveredPosition"
                 )
                 return self.get_position(symbol)
         else:

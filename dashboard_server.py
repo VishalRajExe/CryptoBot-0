@@ -72,7 +72,9 @@ def get_logs_for_symbol(symbol: str, max_lines: int = 100) -> dict:
     sym = symbol.strip().upper().replace("/", "")
 
     if sym in ("BTC", "BTCUSD"):
-        latest = _get_latest_file(os.path.join(BTC_LOGS_DIR, "alpaca_bot_*.log"))
+        latest = _get_latest_file(os.path.join(LOGS_DIR, "BTCUSD_*.log"))
+        if not latest:
+            latest = _get_latest_file(os.path.join(BTC_LOGS_DIR, "alpaca_bot_*.log"))
         lines = _tail_file(latest, max_lines)
         return {
             "symbol": "BTC/USD",
@@ -85,7 +87,7 @@ def get_logs_for_symbol(symbol: str, max_lines: int = 100) -> dict:
         # Merge recent lines across BTC and all altcoins
         all_lines = []
         # BTC log
-        btc_file = _get_latest_file(os.path.join(BTC_LOGS_DIR, "alpaca_bot_*.log"))
+        btc_file = _get_latest_file(os.path.join(LOGS_DIR, "BTCUSD_*.log")) or _get_latest_file(os.path.join(BTC_LOGS_DIR, "alpaca_bot_*.log"))
         if btc_file:
             for l in _tail_file(btc_file, max_lines // 2):
                 all_lines.append(f"[BTC] {l}")
@@ -187,6 +189,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/btc_state":
             data = _read_json_file(BTC_STATE_FILE)
+            if not data:
+                data = _read_json_file(os.path.join(BASE_DIR, "alpaca_state.json"))
             return self._send_json(data)
 
         if path == "/api/backtests":
