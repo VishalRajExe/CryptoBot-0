@@ -60,7 +60,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_ENABLED   = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
 
-BASE_STAKE_USD = float(os.getenv("STAKE_USD_ALT", "300.0"))   # baseline stake per trade
+BASE_STAKE_USD = float(os.getenv("STAKE_USD_ALT", "25.0"))   # baseline micro stake per trade ($100 account)
 
 # Asset → Strategy mapping (Calibrated for Maximum Win Rate & Profit Factor)
 ASSET_CONFIG = {
@@ -231,12 +231,13 @@ class AssetBot:
         return pos
 
     # ── Market Data ──────────────────────────────────────────────────────────
-    def fetch_bars(self) -> Optional[pd.DataFrame]:
+    def fetch_bars(self, tf_override: Optional[TimeFrame] = None) -> Optional[pd.DataFrame]:
         try:
             end   = datetime.now(timezone.utc)
             start = end - timedelta(days=self.days_h)
+            timeframe = tf_override or self.tf
             req   = CryptoBarsRequest(symbol_or_symbols=self.symbol,
-                                      timeframe=self.tf, start=start, end=end)
+                                      timeframe=timeframe, start=start, end=end)
             bars  = self.data_cl.get_crypto_bars(req)
             df    = bars.df
             if df.empty:
@@ -273,6 +274,52 @@ class AssetBot:
         except Exception:
             return 0.0
 
+    def calculate_stake(self) -> float:
+        """
+        Micro-account dynamic stake calculator:
+        Designed for a $100 starting balance compounding to $10,000.
+        Dynamically divides available cash into slots (max 3 concurrent positions)
+        and scales up geometrically with equity growth.
+        """
+        cash = self.get_cash()
+        reserve = max(10.0, cash * 0.15)
+        available = max(0.0, cash - reserve)
+
+        active_positions = self.memory.get_active_positions()
+        slots = max(1, 3 - len(active_positions))
+        target = available / slots
+
+        risk_mult = self.memory.get_risk_multiplier(self.symbol)
+        max_allowed = max(10.0, cash * 0.35)
+        stake = min(max(target * risk_mult, 10.0), max_allowed)
+        return round(stake, 2)
+
+    def get_adaptive_timeframe(self, df: pd.DataFrame, price: float) -> Tuple[TimeFrame, int, str]:
+        """
+        Dynamically adjusts candle resolution based on current market volatility:
+        - High Volatility Expansion (ATR% > 1.4% or Volume Spike): Scalp mode (1m)
+        - Low Volatility Chop (ATR% < 0.6% and ADX < 20): Filter mode (15m) to prevent fee churn
+        - Normal Regime: Base calibrated timeframe
+        """
+        try:
+            if df is None or len(df) < 14:
+                return self.tf, self.tf_min, f"{self.tf_min}m"
+
+            last = df.iloc[-1]
+            atr = float(last.get("atr", 1.0)) if "atr" in df.columns else 1.0
+            atr_pct = (atr / price * 100.0) if price > 0 else 1.0
+            vol_ratio = float(last.get("vol_ratio", 1.0)) if "vol_ratio" in df.columns else 1.0
+            adx = float(last.get("adx", 25.0)) if "adx" in df.columns else 25.0
+
+            if atr_pct > 1.4 or vol_ratio > 1.8:
+                return TF_MAP[1], 1, "1m (High-Vol Scalp)"
+            elif atr_pct < 0.6 and adx < 20:
+                return TF_MAP[15], 15, "15m (Low-Vol Filter)"
+            else:
+                return self.tf, self.tf_min, f"{self.tf_min}m (Standard)"
+        except Exception:
+            return self.tf, self.tf_min, f"{self.tf_min}m"
+
     # ── Orders & Execution ───────────────────────────────────────────────────
     def buy(self, price: float, sl: float, tp: float, features: dict) -> bool:
         # Check cooling period (mistake learning prevention)
@@ -280,18 +327,18 @@ class AssetBot:
             self.log.warning("⏸️ COOL-DOWN ACTIVE: Skipping BUY on %s after consecutive losses.", self.symbol)
             return False
 
-        # Apply adaptive risk sizing
-        risk_mult = self.memory.get_risk_multiplier(self.symbol)
-        active_stake = round(BASE_STAKE_USD * risk_mult, 2)
+        # Micro-account dynamic position sizing
+        active_stake = self.calculate_stake()
+        cash = self.get_cash()
+        if cash < active_stake or active_stake < 5.0:
+            self.log.warning("Insufficient cash $%.2f for active stake $%.2f", cash, active_stake)
+            return False
 
         qty = round(active_stake / price, 6)
         if qty <= 0:
             return False
 
-        cash = self.get_cash()
-        if cash < active_stake:
-            self.log.warning("Insufficient cash $%.2f for active stake $%.2f", cash, active_stake)
-            return False
+        risk_mult = self.memory.get_risk_multiplier(self.symbol)
 
         try:
             order = self.trading.submit_order(MarketOrderRequest(
@@ -348,12 +395,12 @@ class AssetBot:
                 features=in_features
             )
 
-            # Update ML model online sample
-            self.learner.record_online_sample(in_features, learning["is_win"])
-
             pnl = learning["pnl"]
             pnl_pct = learning["pnl_pct"]
             is_win = learning["is_win"]
+
+            # Retrain ML model online immediately with real trade outcome & pnl
+            self.learner.record_online_sample(in_features, is_win, pnl=pnl)
 
             self.log.info("SELL [%s] %.6f %s @ $%.4f | PnL $%.4f (%.2f%%) | %s | RiskMult=%.2fx",
                           "WIN" if is_win else "LOSS", qty, self.symbol,
@@ -370,10 +417,34 @@ class AssetBot:
             return False
         sl  = pos.get("stop_loss", 0.0)
         tp  = pos.get("take_profit", float("inf"))
+        ep  = pos.get("entry_price", price)
+        pnl_pct = ((price - ep) / ep * 100.0) if ep > 0 else 0.0
+        atr = float(features.get("atr", 1.0))
+
+        # 1. Breakeven Lock: Once trade reaches +1.5% profit, raise SL to entry + 0.2% (fee coverage)
+        be_target = round(ep * 1.002, 4)
+        if pnl_pct >= 1.5 and sl < be_target:
+            self.memory.update_stop_loss(self.symbol, be_target)
+            self.log.info("🛡️ BREAKEVEN ACTIVATED on %s: Raised SL to $%.4f (Gain: +%.2f%%)",
+                          self.symbol, be_target, pnl_pct)
+            sl = be_target
+
+        # 2. Dynamic Trailing Stop: Once trade reaches +2.5% profit, trail SL at (price - 1.2 * atr)
+        if pnl_pct >= 2.5:
+            trail_sl = round(price - (1.2 * atr), 4)
+            if trail_sl > sl:
+                self.memory.update_stop_loss(self.symbol, trail_sl)
+                self.log.info("📈 TRAILING STOP UPDATED on %s: Raised SL to $%.4f (Gain: +%.2f%%)",
+                              self.symbol, trail_sl, pnl_pct)
+                sl = trail_sl
+
+        # 3. Stop-Loss Trigger
         if price <= sl:
             self.log.warning("STOP-LOSS hit @ $%.4f (SL=$%.4f)", price, sl)
             self.sell(price, reason="stop_loss", features=features)
             return True
+
+        # 4. Take-Profit Trigger
         if price >= tp:
             self.log.info("TAKE-PROFIT hit @ $%.4f (TP=$%.4f)", price, tp)
             self.sell(price, reason="take_profit", features=features)
@@ -403,6 +474,9 @@ class AssetBot:
                 df      = self.strategy.add_indicators(df)
                 price   = self.get_price() or float(df["close"].iloc[-1])
 
+                # Evaluate market volatility and select adaptive timeframe
+                adaptive_tf, adaptive_tf_min, tf_label = self.get_adaptive_timeframe(df, price)
+
                 # Extract indicator vector for AI learning
                 last = df.iloc[-1]
                 indicators = {}
@@ -418,7 +492,9 @@ class AssetBot:
                     "macd_hist": indicators.get("macd_hist", 0.0),
                     "atr": indicators.get("atr", 1.0),
                     "price": price,
-                    "vol_ratio": indicators.get("vol_ratio", 1.0)
+                    "vol_ratio": indicators.get("vol_ratio", 1.0),
+                    "adx": indicators.get("adx", 25.0),
+                    "ema200": indicators.get("ema200", price),
                 }
 
                 # Check Stop-loss / Take-profit exits
@@ -436,15 +512,15 @@ class AssetBot:
                 cooling_active = self.memory.is_in_cooldown(self.symbol)
                 risk_mult = self.memory.get_risk_multiplier(self.symbol)
 
-                self.log.info("Price=$%.4f | Signal=%s | AI: %.0f%% win prob | PnL_Unreal=$%.2f | RiskMult=%.2fx",
-                              price, result.signal, win_prob * 100, unreal, risk_mult)
+                self.log.info("Price=$%.4f [%s] | Signal=%s | AI: %.0f%% win prob | PnL_Unreal=$%.2f | RiskMult=%.2fx",
+                              price, tf_label, result.signal, win_prob * 100, unreal, risk_mult)
 
                 # Push real-time state to Dashboard
                 update_dashboard(self.symbol, {
                     "symbol": self.symbol,
                     "strategy": self.strategy.NAME,
                     "emoji": self.emoji,
-                    "timeframe": f"{self.tf_min}m",
+                    "timeframe": tf_label,
                     "price": price,
                     "signal": result.signal,
                     "reason": result.reason,

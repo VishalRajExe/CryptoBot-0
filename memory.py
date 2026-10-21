@@ -82,6 +82,30 @@ class TradeMemory:
                     risk_multiplier REAL DEFAULT 1.0,
                     updated_at TEXT
                 );
+
+                -- Machine Learning Training Dataset (Persisted across reboots)
+                CREATE TABLE IF NOT EXISTS ml_training_samples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    features_json TEXT NOT NULL,
+                    outcome INTEGER NOT NULL, -- 1=Win, 0=Loss
+                    pnl REAL NOT NULL,
+                    pnl_pct REAL NOT NULL
+                );
+
+                -- Mistake Memory & Loss Regimes (Catalog of failed trade setups)
+                CREATE TABLE IF NOT EXISTS mistake_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    features_json TEXT NOT NULL,
+                    loss_amount REAL NOT NULL,
+                    loss_pct REAL NOT NULL,
+                    exit_reason TEXT NOT NULL
+                );
             """)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -117,6 +141,18 @@ class TradeMemory:
         with _db_lock, self._get_conn() as conn:
             conn.execute("DELETE FROM active_positions WHERE symbol = ?", (symbol,))
             conn.commit()
+
+    def update_stop_loss(self, symbol: str, stop_loss: float) -> None:
+        """Update stop loss dynamically for breakeven or trailing stop."""
+        with _db_lock, self._get_conn() as conn:
+            conn.execute("UPDATE active_positions SET stop_loss = ? WHERE symbol = ?", (stop_loss, symbol))
+            conn.commit()
+
+    def get_active_positions(self) -> List[dict]:
+        """Returns all currently open positions across all coins."""
+        with _db_lock, self._get_conn() as conn:
+            rows = conn.execute("SELECT * FROM active_positions").fetchall()
+            return [dict(r) for r in rows]
 
     def reconcile_with_alpaca(self, trading_client, symbol: str, fallback_sl_pct: float = 0.015,
                               fallback_tp_pct: float = 0.03) -> Optional[dict]:
@@ -241,6 +277,27 @@ class TradeMemory:
                 exit_time if not is_win else (row["last_loss_time"] if row else None),
                 cooldown_until, round(risk_mult, 2), exit_time
             ))
+
+            # 4. Record sample into persistent ML training dataset
+            conn.execute("""
+                INSERT INTO ml_training_samples 
+                (symbol, strategy, timestamp, features_json, outcome, pnl, pnl_pct)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                symbol, strategy, exit_time, json.dumps(features or {}),
+                1 if is_win else 0, round(pnl, 6), round(pnl_pct, 4)
+            ))
+
+            # 5. If loss, catalog into mistake_patterns memory
+            if not is_win:
+                conn.execute("""
+                    INSERT INTO mistake_patterns
+                    (symbol, strategy, timestamp, features_json, loss_amount, loss_pct, exit_reason)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    symbol, strategy, exit_time, json.dumps(features or {}),
+                    abs(round(pnl, 6)), abs(round(pnl_pct, 4)), reason
+                ))
             conn.commit()
 
         return {
@@ -312,3 +369,36 @@ class TradeMemory:
                 ORDER BY id DESC LIMIT ?
             """, (limit,)).fetchall()
             return [dict(r) for r in rows]
+
+    def get_all_ml_samples(self) -> List[dict]:
+        """Returns all persisted machine learning training samples."""
+        with _db_lock, self._get_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM ml_training_samples 
+                ORDER BY id ASC
+            """).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_recent_mistakes(self, limit: int = 50) -> List[dict]:
+        """Returns recent losing market regimes for mistake pattern avoidance."""
+        with _db_lock, self._get_conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM mistake_patterns 
+                ORDER BY id DESC LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_mistake_summary(self) -> dict:
+        """Returns statistics on learned mistakes and losing patterns."""
+        with _db_lock, self._get_conn() as conn:
+            total_mistakes = conn.execute("SELECT COUNT(*) as c FROM mistake_patterns").fetchone()["c"]
+            recent = conn.execute("""
+                SELECT symbol, strategy, loss_amount, loss_pct, exit_reason, timestamp 
+                FROM mistake_patterns 
+                ORDER BY id DESC LIMIT 5
+            """).fetchall()
+            return {
+                "total_mistakes_remembered": total_mistakes,
+                "recent_mistakes": [dict(r) for r in recent]
+            }
+

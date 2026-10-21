@@ -1,0 +1,85 @@
+{
+  "symbol": "BTC/USD",
+  "strategy": "VwapBreakout",
+  "days": 7,
+  "timeframe_minutes": 15,
+  "stake_usd": 1000.0,
+  "total_trades": 6,
+  "wins": 2,
+  "losses": 4,
+  "win_rate_pct": 33.33,
+  "total_pnl": 8.0224,
+  "avg_win": 8.8395,
+  "avg_loss": -2.4141,
+  "profit_factor": 1.831,
+  "max_drawdown": 5.7642,
+  "sharpe_ratio": 3.588,
+  "trades": [
+    {
+      "entry_time": "2026-10-16 11:00:00+00:00",
+      "exit_time": "2026-10-16 12:00:00+00:00",
+      "entry_price": 82551.925,
+      "exit_price": 82128.9385,
+      "qty": 0.012114,
+      "pnl": -3.8924,
+      "pnl_pct": -0.389,
+      "reason": "stop_loss",
+      "win": "False"
+    },
+    {
+      "entry_time": "2026-10-17 04:00:00+00:00",
+      "exit_time": "2026-10-17 15:45:00+00:00",
+      "entry_price": 81442.465,
+      "exit_price": 81244.544,
+      "qty": 0.012279,
+      "pnl": -1.8482,
+      "pnl_pct": -0.185,
+      "reason": "stop_loss",
+      "win": "False"
+    },
+    {
+      "entry_time": "2026-10-17 20:00:00+00:00",
+      "exit_time": "2026-10-17 21:15:00+00:00",
+      "entry_price": 81521.17,
+      "exit_price": 81027.6055,
+      "qty": 0.012267,
+      "pnl": -1.6662,
+      "pnl_pct": -0.167,
+      "reason": "stop_loss",
+      "win": "False"
+    },
+    {
+      "entry_time": "2026-10-18 11:00:00+00:00",
+      "exit_time": "2026-10-18 13:00:00+00:00",
+      "entry_price": 81992.2,
+      "exit_price": 81807.6785,
+      "qty": 0.012196,
+      "pnl": -2.2498,
+      "pnl_pct": -0.225,
+      "reason": "stop_loss",
+      "win": "False"
+    },
+    {
+      "entry_time": "2026-10-20 13:45:00+00:00",
+      "exit_time": "2026-10-20 14:00:00+00:00",
+      "entry_price": 82035.6685,
+      "exit_price": 83138.899,
+      "qty": 0.01219,
+      "pnl": 10.0468,
+      "pnl_pct": 1.005,
+      "reason": "take_profit",
+      "win": "True"
+    },
+    {
+      "entry_time": "2026-10-20 14:15:00+00:00",
+      "exit_time": "2026-10-21 13:00:00+00:00",
+      "entry_price": 82890.541,
+      "exit_price": 83523.1855,
+      "qty": 0.012064,
+      "pnl": 7.6322,
+      "pnl_pct": 0.763,
+      "reason": "end_of_data",
+      "win": true
+    }
+  ]
+}

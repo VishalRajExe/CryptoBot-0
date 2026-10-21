@@ -1,0 +1,41 @@
+{
+  "symbol": "BTC/USD",
+  "strategy": "BinHCluc",
+  "days": 7,
+  "timeframe_minutes": 5,
+  "stake_usd": 1000.0,
+  "total_trades": 2,
+  "wins": 2,
+  "losses": 0,
+  "win_rate_pct": 100.0,
+  "total_pnl": 20.7256,
+  "avg_win": 10.3628,
+  "avg_loss": 0,
+  "profit_factor": 20725.6,
+  "max_drawdown": 0.0,
+  "sharpe_ratio": 169.849,
+  "trades": [
+    {
+      "entry_time": "2026-10-15 02:20:00+00:00",
+      "exit_time": "2026-10-15 04:50:00+00:00",
+      "entry_price": 80638.46,
+      "exit_price": 81552.2,
+      "qty": 0.012401,
+      "pnl": 11.0499,
+      "pnl_pct": 1.105,
+      "reason": "take_profit",
+      "win": true
+    },
+    {
+      "entry_time": "2026-10-15 13:50:00+00:00",
+      "exit_time": "2026-10-15 14:05:00+00:00",
+      "entry_price": 79786.595,
+      "exit_price": 80908.775,
+      "qty": 0.012533,
+      "pnl": 9.6757,
+      "pnl_pct": 0.968,
+      "reason": "take_profit",
+      "win": true
+    }
+  ]
+}

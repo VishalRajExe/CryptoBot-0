@@ -187,13 +187,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 lrn = TradeLearner()
                 data = {
                     "memory": mem.get_learning_summary(),
-                    "recent_trades": mem.get_recent_trades(limit=20),
-                    "ai_learner": {
-                        "is_trained": lrn.is_trained,
-                        "sample_count": lrn.sample_count,
-                        "benchmark_win_rate": round(lrn.win_rate * 100, 1),
-                        "model": "RandomForestClassifier (50 trees, max_depth=4)"
-                    }
+                    "mistakes": mem.get_mistake_summary(),
+                    "recent_trades": mem.get_recent_trades(limit=25),
+                    "ai_learner": lrn.get_metrics()
                 }
                 return self._send_json(data)
             except Exception as e:
@@ -203,9 +199,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
 
+class ThreadingServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def start_dashboard(auto_open: bool = True):
-    with socketserver.TCPServer(("", PORT), DashboardHandler) as httpd:
-        httpd.allow_reuse_address = True
+    try:
+        httpd = ThreadingServer(("0.0.0.0", PORT), DashboardHandler)
         url = f"http://localhost:{PORT}"
         print(f"\n============================================================")
         print(f"  Live Dashboard running at: {url}")
@@ -214,6 +215,8 @@ def start_dashboard(auto_open: bool = True):
         if auto_open:
             threading.Timer(1.0, lambda: webbrowser.open(url)).start()
         httpd.serve_forever()
+    except Exception as e:
+        print(f"Dashboard server startup notice: {e}")
 
 
 if __name__ == "__main__":

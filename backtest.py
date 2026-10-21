@@ -51,7 +51,7 @@ def fetch_bars(symbol: str, tf_minutes: int, days: int) -> pd.DataFrame:
 
 
 def run_backtest(symbol: str, strategy_name: str, days: int,
-                 stake_usd: float = 1000.0) -> dict:
+                 stake_usd: float = 25.0) -> dict:
     if strategy_name not in STRATEGY_REGISTRY:
         raise ValueError(f"Unknown strategy: {strategy_name}. Available: {list(STRATEGY_REGISTRY.keys())}")
 
@@ -206,7 +206,7 @@ if __name__ == "__main__":
     parser.add_argument("--symbol",   default="ETH/USD",         help="e.g. ETH/USD")
     parser.add_argument("--strategy", default="MomentumEmaRibbon", help="ScalpMacdRsi | MomentumEmaRibbon | VwapBreakout")
     parser.add_argument("--days",     type=int, default=30,       help="Historical days to test on")
-    parser.add_argument("--stake",    type=float, default=1000.0, help="USD per trade in simulation")
+    parser.add_argument("--stake",    type=float, default=25.0, help="USD per trade in simulation (default: $25.0 for $100 balance)")
     args = parser.parse_args()
 
     run_backtest(args.symbol, args.strategy, args.days, args.stake)

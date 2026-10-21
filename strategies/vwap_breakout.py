@@ -58,6 +58,13 @@ class VwapBreakout(BaseStrategy):
         sig      = macd.ewm(span=p["macd_signal"],  adjust=False).mean()
         df["macd_hist"] = macd - sig
         df["macd_positive"] = df["macd_hist"] > 0
+
+        # RSI(14) for AI feature vectors
+        delta = close.diff()
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        rs = gain / loss.replace(0, float("nan"))
+        df["rsi"] = 100.0 - (100.0 / (1.0 + rs))
         df["macd_negative"] = df["macd_hist"] < 0
 
         # ATR

@@ -465,19 +465,19 @@
         <div class="stat-card-sub">WAL Mode • ACID Durable (Survives Reboots)</div>
       </div>
       <div class="stat-card" style="border-color:rgba(56,189,248,0.3)">
-        <div class="stat-card-title" style="color:var(--blue)">Ground-Truth Reconciliation</div>
-        <div class="stat-card-val" style="font-size:18px;color:var(--blue)">Alpaca Sync Active</div>
-        <div class="stat-card-sub">Adopts orphan positions on boot immediately</div>
+        <div class="stat-card-title" style="color:var(--blue)">Online Retraining Status</div>
+        <div class="stat-card-val" style="font-size:18px;color:var(--blue)" id="aiModelLabel">Ensemble ML (Syncing...)</div>
+        <div class="stat-card-sub" id="aiRetrainSub">Continuous partial_fit + RF Refitting</div>
+      </div>
+      <div class="stat-card" style="border-color:rgba(239,68,68,0.3)">
+        <div class="stat-card-title" style="color:var(--red)">Mistake Memory & Loss Avoidance</div>
+        <div class="stat-card-val" style="font-size:18px;color:var(--red)" id="aiMistakesLabel">Cataloging...</div>
+        <div class="stat-card-sub">AI Vetoes Regimes Matching Prior Losses</div>
       </div>
       <div class="stat-card" style="border-color:rgba(16,185,129,0.3)">
-        <div class="stat-card-title" style="color:var(--green)">AI Classifier</div>
-        <div class="stat-card-val" style="font-size:18px;color:var(--green)" id="aiModelLabel">RandomForest (571 samples)</div>
-        <div class="stat-card-sub">Pre-trained on historical setups & live trades</div>
-      </div>
-      <div class="stat-card" style="border-color:rgba(245,158,11,0.3)">
-        <div class="stat-card-title" style="color:var(--yellow)">Adaptive Risk & Circuit Breaker</div>
-        <div class="stat-card-val" style="font-size:18px;color:var(--yellow)" id="circuitBreakerStatus">All Symbols Healthy</div>
-        <div class="stat-card-sub">2-loss cooling circuit breaker & dynamic stake scaling</div>
+        <div class="stat-card-title" style="color:var(--green)">$100 ➔ $10,000 Micro-Scaling</div>
+        <div class="stat-card-val" style="font-size:18px;color:var(--green)" id="microCompoundingLabel">Dynamic Equity Sizing</div>
+        <div class="stat-card-sub" id="circuitBreakerStatus">Max 3 concurrent positions • 15% reserve buffer</div>
       </div>
     </div>
 
@@ -861,8 +861,13 @@
           if (lrnRes.ok) {
             const lrn = await lrnRes.json();
             if (lrn.ai_learner) {
+              const a = lrn.ai_learner;
               document.getElementById("aiModelLabel").textContent =
-                `RandomForest (${lrn.ai_learner.sample_count} samples)`;
+                `Ensemble (${a.sample_count} samples)`;
+              document.getElementById("aiRetrainSub").textContent =
+                `${a.retraining_events} Retrain Cycles • Win Rate: ${a.win_rate_pct}%`;
+              document.getElementById("aiMistakesLabel").textContent =
+                `${a.mistakes_remembered} Mistakes Avoided`;
             }
             if (lrn.memory && lrn.memory.symbols) {
               let hasCooling = false;
@@ -872,10 +877,10 @@
                 multStr.push(`${sym.split('/')[0]}: ${s.risk_multiplier}x`);
               });
               if (hasCooling) {
-                document.getElementById("circuitBreakerStatus").textContent = "Cooling Active";
+                document.getElementById("circuitBreakerStatus").textContent = "Cooling Active (2 consecutive losses)";
                 document.getElementById("circuitBreakerStatus").style.color = "var(--red)";
               } else if (multStr.length) {
-                document.getElementById("circuitBreakerStatus").textContent = multStr.slice(0, 3).join(" | ");
+                document.getElementById("circuitBreakerStatus").textContent = `Stakes: ${multStr.slice(0, 3).join(" • ")}`;
               }
             }
             if (lrn.recent_trades && lrn.recent_trades.length > 0) {

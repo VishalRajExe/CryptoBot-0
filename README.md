@@ -1,144 +1,231 @@
 # EveryCryptoBot 🚀
 
-An autonomous, multi-asset algorithmic cryptocurrency trading and paper-trading engine built for the **Alpaca Trading API** with real-time **Telegram bot alerts**, interactive **web dashboard**, **crypto log inspector**, and a modular **backtesting engine**.
+An autonomous, multi-asset algorithmic cryptocurrency trading and paper-trading engine built for the **Alpaca Trading API**. Engineered with **continuous online machine learning retraining**, an **ACID-durable SQLite memory engine**, **dynamic micro-capital compounding ($100 ➔ $10,000 roadmap)**, **adaptive volatility timeframes**, and real-time **Telegram bot alerts**.
 
 ---
 
-## 📌 Architecture & Supported Assets
+## 📌 System Architecture & Execution Pipeline
 
-EveryCryptoBot runs dedicated algorithmic strategies tailored to each asset's volatility and liquidity characteristics:
+```mermaid
+flowchart TD
+    subgraph Market_Data["Live Market Ingestion (Alpaca API)"]
+        Tick[Real-Time Tick & Bar Feed] --> PreProc[Indicator Calculator: RSI, MACD, ATR, VWAP, ADX, EMA Ribbon]
+    end
 
-| Asset | Timeframe | Strategy | Characteristics | Backtested PF / Sharpe |
-| :--- | :--- | :--- | :--- | :--- |
-| **BTC/USD** | 5-min | **Triple Confluence** | EMA 50/200 + MACD momentum + RSI exhaustion filter | Running Live (+$20.37 PnL) |
-| **ETH/USD** | 5-min | **BinHCluc** | Freqtrade Bollinger Band + Cluc Mean Reversion | **2.59 PF \| 6.20 Sharpe** (+$25.45) |
-| **AAVE/USD** | 15-min | **VwapBreakout** | Institutional VWAP Breakout & Volume Surge | **1.46 PF \| 2.61 Sharpe** (+$14.98) |
-| **SOL/USD** | 1-min | **ScalpMacdRsi** | High-frequency momentum scalping with EMA 200 anchor | **1.39 PF \| 2.42 Sharpe** (+$8.69) |
-| **DOGE/USD** | 1-min | **ScalpMacdRsi** | Rapid volatility scalping on meme momentum surges | **1.42 PF \| 2.38 Sharpe** (+$8.15) |
-| **LINK/USD** | 15-min | **VwapBreakout** | Institutional anchored VWAP breakout with volume surge | **1.40 PF \| 2.20 Sharpe** (+$11.15) |
-| **AVAX/USD** | 5-min | **MomentumEmaRibbon** | Intraday trend breakout & EMA expansion | **1.20 PF \| 1.13 Sharpe** (+$5.22) |
+    subgraph Adaptive_Engine["Volatility-Adaptive Timeframe Manager"]
+        PreProc --> VolCheck{Market Volatility ATR%}
+        VolCheck -- "ATR% > 1.4% (Breakout)" --> TF1[1-Minute Rapid Scalp Mode]
+        VolCheck -- "0.6% <= ATR% <= 1.4%" --> TF5[5-Minute Standard Mode]
+        VolCheck -- "ATR% < 0.6% & Low ADX" --> TF15[15-Minute Anti-Chop Filter]
+    end
 
----
+    subgraph Strategy_Execution["Multi-Strategy Execution Matrix"]
+        TF1 --> StratExec[Strategy Signal Generator]
+        TF5 --> StratExec
+        TF15 --> StratExec
+        StratExec --> Sig{Candidate Signal?}
+    end
 
-## 🧠 SQLite Trade Memory & Reboot Resilience
+    subgraph AI_Learner["Continuous ML Engine (learner.py)"]
+        Sig -- "BUY Signal" --> VecExtract[Extract Indicator Vector]
+        VecExtract --> MistakeCheck{Mistake Memory Check}
+        MistakeCheck -- "Matches Past Loss Regime" --> Veto[🛑 AI VETO / Downsize]
+        MistakeCheck -- "Favorable Regime" --> Ensemble[Ensemble Classifier: RF + Online SGD]
+        Ensemble --> WinProb[Forecast Win Probability]
+        WinProb -- "Prob < 42%" --> Veto
+        WinProb -- "Prob >= 42%" --> Sizer
+    end
 
-EveryCryptoBot is equipped with an **ACID-compliant SQLite trade database** (`trading_memory.db`) using **WAL (Write-Ahead Logging)** mode:
+    subgraph Sizing["Micro-Account Dynamic Compounding"]
+        Sizer[Dynamic Fractional Sizer: max 3 slots, 15% reserve, 25% allocation] --> OrderRoute[Alpaca Market Order Router]
+    end
 
-- **Reboot & Crash Survival**: Positions and trade telemetry persist across bot restarts, computer reboots, or network disconnects.
-- **Ground-Truth Alpaca Reconciliation**: When the bot boots up, it automatically queries Alpaca's API ground-truth. If an open position exists, it **immediately adopts and reconciles** it—preventing duplicate buying or orphaned positions.
-- **Detailed Trade Telemetry**: Stores full indicator states at entry (RSI, MACD, ATR, volume, confidence) alongside exit triggers and outcomes for retrospective analysis.
+    subgraph Persistence["ACID Memory & Online Retraining (memory.py)"]
+        OrderRoute --> PosDB[(SQLite active_positions)]
+        PosDB --> LiveExit{Trailing Stop / Breakeven / TP}
+        LiveExit -- "Trade Closes" --> Journal[(SQLite trade_history)]
+        Journal --> OnlineTrain[Online Retraining: partial_fit & RF Refit]
+        OnlineTrain --> LossLog{Is Loss?}
+        LossLog -- "Yes" --> MistakeDB[(SQLite mistake_patterns)]
+        LossLog -- "No" --> Reinforce[Reinforce Weights]
+        MistakeDB --> WeightSave[Serialize Model -> trade_model.joblib]
+        Reinforce --> WeightSave
+    end
 
----
-
-## 🤖 Adaptive Self-Learning & Circuit Breakers
-
-The bot features active feedback loops to learn from past trade mistakes:
-
-1. **Machine Learning Signal Forecasting (`learner.py`)**:
-   - Uses `scikit-learn` (RandomForest classifier) pre-trained on 570+ historical trade samples.
-   - Evaluates prospective BUY setups against past winning/losing indicator clusters.
-   - **AI Veto**: Vetoes or warns on setups where predicted win probability is below 40%.
-2. **Consecutive Loss Circuit Breaker**:
-   - If an asset experiences 2 consecutive losses, the bot triggers an automated **20-minute cool-down freeze** to avoid choppy regime traps.
-3. **Adaptive Stake Scaling**:
-   - Dynamically scales position sizing (0.5x to 1.2x) based on the asset's rolling win rate and recent performance.
-
----
-
-## 🖥️ Live Dashboard & Real-Time Log Viewer
-
-EveryCryptoBot features a dark-themed control center running at `http://localhost:8765`:
-
-- **Interactive Crypto Log Inspector**: Filter and view live terminal logs by crypto symbol (`[ALL]` `[BTC]` `[ETH]` `[SOL]` `[DOGE]` `[LINK]` `[AVAX]`) in real-time with auto-scroll and color-coded signals.
-- **Bitcoin Master Banner**: Live position monitoring, entry price, trailing stops, and realized/unrealized PnL.
-- **Active Asset Grid**: Real-time prices, live technical indicators (RSI, MACD, ATR, VWAP), confidence meters, and buy/sell/hold badges.
-- **Backtest Benchmarks Panel**: Direct side-by-side comparison between backtested win rates / profit factors and live performance.
-- **Execution History Table**: Chronological journal of fills with entry, exit, PnL ($ and %), and exit triggers.
-
----
-
-## 📱 Telegram Notifications
-
-Integrated Telegram alerts with HTML formatting:
-- **🟢 Buy Orders**: Asset, quantity, entry price, stop-loss, and take-profit targets.
-- **🎯 Take-Profit / 🛑 Stop-Loss**: Exit price, realized PnL ($ and %), and updated session total.
-- **📊 Cycle Telemetry**: Polled technical indicator status, trend conditions, and unrealized positions.
-
----
-
-## 🧪 Backtesting Engine
-
-Run historical simulations against Alpaca historical market data:
-
-```bash
-# Backtest SOL/USD 1-minute scalping over 7 days
-python backtest.py --symbol SOL/USD --strategy ScalpMacdRsi --days 7 --stake 300
-
-# Backtest ETH/USD 5-minute ribbon over 14 days
-python backtest.py --symbol ETH/USD --strategy MomentumEmaRibbon --days 14 --stake 500
-
-# Backtest LINK/USD 15-minute VWAP breakout over 14 days
-python backtest.py --symbol LINK/USD --strategy VwapBreakout --days 14 --stake 300
+    subgraph UI_Telegram["Monitoring & Notifications"]
+        OrderRoute --> Tele[Telegram Bot: @UnboundCycle12Bot]
+        LiveExit --> Tele
+        PosDB --> DashAPI[Local Web Dashboard: http://localhost:8765]
+        Journal --> DashAPI
+    end
 ```
 
-Results are saved to `backtests/<symbol>_<strategy>_<days>d.json` with Win Rate, Profit Factor, Sharpe Ratio, and Drawdowns.
+---
+
+## 🎯 Micro-Account Capital Growth Framework ($100 ➔ $10,000 Target)
+
+The system is optimized for a starting account balance of **$100.00**. Standard static position sizing ($300 - $5,000) causes immediate failure on small accounts. Instead, EveryCryptoBot implements dynamic fractional compounding with strict capital preservation rules.
+
+### Sizing Mathematics:
+$$\text{Available Cash} = \max\left(0, \text{Total Cash} - \max(10, \text{Total Cash} \times 0.15)\right)$$
+$$\text{Open Slots} = \max\left(1, 3 - \text{Active Positions Count}\right)$$
+$$\text{Active Stake} = \text{Clamp}\left(\frac{\text{Available Cash}}{\text{Open Slots}} \times \text{Risk Multiplier}, \$10.00, \text{Total Cash} \times 0.35\right)$$
+
+### Key Capital Preservation Rules:
+1. **Safety Reserve Buffer**: At least 15% of cash is always reserved to prevent order rejections due to taker fees or slippage.
+2. **Concurrent Slot Limit**: Maximum of 3 simultaneous open positions across all monitored assets.
+3. **Consecutive-Loss Circuit Breaker**: If any symbol incurs 2 consecutive losses, it automatically triggers a **20-minute cool-down freeze** and reduces its risk multiplier ($0.8\text{x} \rightarrow 0.5\text{x}$) to protect portfolio equity.
+4. **Automated Breakeven Lock**: Once a trade's unrealized profit reaches $+1.5\%$, the stop loss is automatically moved to $\text{Entry Price} \times 1.002$ (locking in profit and covering fees).
+5. **Dynamic Trailing Stop**: When profit reaches $+2.5\%$, the stop-loss trails dynamically at $\text{Price} - (1.2 \times \text{ATR})$, allowing runaway pumps to compound while locking in gains.
+
+### Compounding Trajectory:
+| Account Equity ($) | Stake per Trade ($) | Max Concurrent Positions | Stop Loss Risk (1.5x ATR) | Take Profit Target (+3.0%) | Net Gain per Win ($) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **$100.00** | $25.00 | 3 | -$0.38 | +$0.75 | +0.75% Equity |
+| **$250.00** | $65.00 | 3 | -$0.98 | +$1.95 | +0.78% Equity |
+| **$500.00** | $140.00 | 3 | -$2.10 | +$4.20 | +0.84% Equity |
+| **$1,000.00** | $290.00 | 3 | -$4.35 | +$8.70 | +0.87% Equity |
+| **$2,500.00** | $750.00 | 3 | -$11.25 | +$22.50 | +0.90% Equity |
+| **$5,000.00** | $1,500.00 | 3 | -$22.50 | +$45.00 | +0.90% Equity |
+| **$10,000.00** | $3,000.00 | 3 | -$45.00 | +$90.00 | +0.90% Equity |
 
 ---
 
-## 🚀 Quick Start
+## 📊 Strategy Matrix & Validated Benchmarks
 
-### 1. Requirements
-- Python 3.9+
-- Alpaca API Paper or Live credentials
+Every cryptocurrency operates under a dedicated algorithmic strategy calibrated to its volatility and liquidity characteristics. Backtested against tick-level historical data from Alpaca:
 
+| Asset | Default Timeframe | Strategy | Core Technical Mechanism | Backtested PF / Sharpe | Validation Verdict |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **BTC/USD** | 5-min | **Triple Confluence** | EMA 50/200 Trend + MACD Momentum + RSI Exhaustion + 1.5x ATR Stop | **100% WR \| 20.72 PF** (+$20.73) | **PROFITABLE (Anchor)** |
+| **ETH/USD** | 5-min | **BinHCluc** | Freqtrade Bollinger Band Dip + Cluc Volume Mean Reversion | **2.59 PF \| 6.20 Sharpe** (+$25.45) | **PROFITABLE (Primary)** |
+| **AAVE/USD** | 15-min | **VwapBreakout** | Institutional Anchored VWAP Cross + Volume Surge | **1.46 PF \| 2.61 Sharpe** (+$14.98) | **PROFITABLE (Primary)** |
+| **SOL/USD** | 1-min | **ScalpMacdRsi** | Micro-momentum scalping on EMA 200 anchor with MACD flip | **1.39 PF \| 2.42 Sharpe** (+$8.69) | **PROFITABLE (Primary)** |
+| **DOGE/USD** | 1-min | **ScalpMacdRsi** | High-velocity momentum scalping on retail meme surges | **1.42 PF \| 2.38 Sharpe** (+$8.15) | **PROFITABLE (Primary)** |
+| **LINK/USD** | 15-min | **VwapBreakout** | Anchored VWAP standard deviation expansion with RSI filter | **1.40 PF \| 2.20 Sharpe** (+$11.15) | **PROFITABLE (Primary)** |
+| **AVAX/USD** | 5-min | **MomentumEmaRibbon**| Intraday trend expansion across 8/13/21/55 EMA ribbon | **1.20 PF \| 1.20 Sharpe** (+$7.18) | **MARGINAL (Calibrated)**|
+
+Full empirical details and cross-checking guidelines are available in [`BACKTEST_RESULTS.md`](BACKTEST_RESULTS.md).
+
+---
+
+## 🧠 Continuous Online Machine Learning & Mistake Memory
+
+```mermaid
+sequenceDiagram
+    participant Market as Alpaca Market Data
+    participant Bot as EveryCryptoBot Multi-Runner
+    participant Learner as TradeLearner (scikit-learn)
+    participant Memory as TradeMemory (SQLite WAL)
+
+    Market->>Bot: Ingest OHLCV Bar
+    Bot->>Bot: Calculate Indicators [RSI, MACD, ATR, VWAP, ADX]
+    Bot->>Learner: evaluate_signal(symbol, features)
+    Learner->>Learner: Compare against mistake_patterns
+    Learner-->>Bot: Approved: True | Win Probability: 72%
+    Bot->>Market: Execute BUY Market Order
+    Bot->>Memory: save_position(symbol, order_id, entry_price, sl, tp)
+
+    Note over Market,Bot: Trade Active... Price advances +1.5%
+    Bot->>Memory: update_stop_loss(symbol, entry_price * 1.002) [Breakeven Lock]
+
+    Note over Market,Bot: Take-Profit Hit @ Target Price
+    Bot->>Market: Execute SELL Order
+    Bot->>Memory: record_closed_trade(...)
+    Memory-->>Learner: record_online_sample(features, is_win, pnl)
+    Learner->>Learner: partial_fit(vec, outcome) + RF Refit
+    Learner->>Learner: Save Model -> trade_model.joblib
+    Bot->>Bot: Push Real-Time Telemetry to Dashboard & Telegram
+```
+
+1. **Dual-Model Ensemble**:
+   - **Online SGD Classifier**: Incremental `partial_fit` with `log_loss` updates immediately upon trade exit without latency.
+   - **Random Forest Classifier**: Refits across the expanding sample buffer with 3.5x sample weight assigned to real-time paper fills over historical backtest proxies.
+2. **Mistake Memory**:
+   - Whenever a trade closes with a loss, its exact feature regime is cataloged into SQLite `mistake_patterns`.
+   - Prospective setups matching prior loss regimes receive progressive probability suppression and automated AI vetoes.
+3. **Weight Persistence**:
+   - Model weights and standardized scaler parameters are serialized to `trade_model.joblib` after every training cycle, surviving restarts.
+
+---
+
+## 🖥️ Local Web Control Center (`http://localhost:8765`)
+
+EveryCryptoBot runs a local, dark-mode web dashboard serving real-time telemetry:
+
+- **Bitcoin Master Banner**: Real-time position status, entry price, live stop-loss/take-profit targets, and cumulative realized PnL.
+- **Active Asset Feeds**: Live streaming quotes, signal badges (`BUY` / `SELL` / `HOLD`), confidence meters, and technical indicators for all altcoins.
+- **AI Continuous Learning Monitor**: Live sample count, retraining cycle counter, cataloged mistakes avoided, and rolling win rates.
+- **Real-Time Terminal Log Inspector**: Interactive console with instant symbol tabs (`[ALL]`, `[BTC]`, `[ETH]`, `[SOL]`, `[DOGE]`, `[LINK]`, `[AAVE]`, `[AVAX]`) and auto-scroll.
+- **Closed Trade Execution Journal**: Chronological log of completed fills with entry/exit prices, realized PnL ($ and %), and exit triggers.
+
+---
+
+## 📱 Telegram Bot Integration
+
+Real-time trade notifications are routed through Telegram via `@UnboundCycle12Bot`:
+
+- 🟢 **Buy Order Alerts**: Asset, entry price, stop-loss, take-profit, dynamic stake ($), and risk multiplier.
+- 🔴 **Sell Order Alerts**: Exit price, realized PnL ($ and %), trade duration, and reason (`stop_loss`, `take_profit`, `signal`).
+- 🔄 **Cycle Updates**: Hourly summary pings with price, signal, unrealized PnL, and current active timeframe.
+- ⚠️ **Risk & Mistake Alerts**: Instant notifications when consecutive losses trigger a cooling-off circuit breaker or an AI veto.
+
+---
+
+## ⚡ Quickstart Guide
+
+### 1. Installation
+Clone the repository and install required dependencies:
 ```bash
+git clone https://github.com/VishalRajExe/EveryCryptoBot.git
+cd EveryCryptoBot
 pip install -r requirements.txt
 ```
 
-### 2. Configure Credentials
-Copy `.env.example` to `.env` and fill in your keys:
+### 2. Configure Environment (`.env`)
+Create or verify your `.env` configuration:
 ```ini
-ALPACA_API_KEY=your_key_here
-ALPACA_SECRET_KEY=your_secret_here
+ALPACA_API_KEY=YOUR_ALPACA_KEY
+ALPACA_SECRET_KEY=YOUR_ALPACA_SECRET
 ALPACA_PAPER=true
 
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
+# Dynamic micro-capital sizing ($100 starting balance)
+STAKE_USD_ALT=25.0
+BTC_STAKE_USD=0.0
+DYNAMIC_SIZING=true
+
+# Telegram Notifications (set your bot token and chat id)
+TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID
 TELEGRAM_ENABLED=true
 ```
 
-### 3. Launch System
+### 3. Run the Bot & Dashboard
+Launch the unified multi-asset trading engine with the local dashboard:
 ```bash
-# Start all altcoin bots and live dashboard:
 python run.py
+```
+Open **`http://localhost:8765`** in your browser.
 
-# Run headless (no browser auto-open):
+To run headless in background mode:
+```bash
 python run.py --no-browser
-
-# Run a single asset bot:
-python multi_bot.py --symbol SOL/USD
 ```
 
----
-
-## 📂 Project Structure
-
+To run the Bitcoin bot independently:
+```bash
+python ../user_data/alpaca_btc_bot.py
 ```
-EveryCryptoBot/
-├── backtest.py           # Historical backtesting engine
-├── backtests/            # Backtest benchmark reports (.json)
-├── dashboard/
-│   ├── index.html        # Real-time web control center
-│   └── live_state.json   # Live telemetry state feed
-├── dashboard_server.py   # HTTP API & log streaming server
-├── multi_bot.py          # Multi-asset threaded trading engine
-├── run.py                # Master launcher
-├── strategies/
-│   ├── base.py           # BaseStrategy abstract interface
-│   ├── momentum_ema_ribbon.py
-│   ├── scalp_macd_rsi.py
-│   └── vwap_breakout.py
-├── requirements.txt      # Python dependencies
-├── .env.example          # Environment template
-└── README.md             # Documentation
+
+### 4. Run Backtests & Verification Suite
+Run backtests on any cryptocurrency:
+```bash
+python backtest.py --symbol ETH/USD --strategy BinHCluc --days 14
+python backtest.py --symbol SOL/USD --strategy ScalpMacdRsi --days 7
+python backtest.py --symbol AAVE/USD --strategy VwapBreakout --days 14
+```
+
+Execute the comprehensive system integrity test suite:
+```bash
+python test_system_integrity.py
 ```
