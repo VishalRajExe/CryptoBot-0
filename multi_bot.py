@@ -228,28 +228,28 @@ def send_telegram_detailed(text: str, chat_id: Optional[str] = None) -> tuple[bo
             import urllib.parse, urllib.request
 
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-                data = urllib.parse.urlencode(
-                    {
-                        "chat_id": tc,
-                        "text": text,
-                        "parse_mode": "HTML",
-                        "disable_web_page_preview": "true",
-                    }
-                ).encode("utf-8")
-                req = urllib.request.Request(
-                    url, data=data, headers={"User-Agent": "EveryCryptoBot/3.0"}
-                )
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    info["status"] = resp.status
-                    details["attempts"].append(info)
-                    if resp.status == 200:
-                        return True, details
-            except urllib.error.HTTPError as e:
-                info["error"] = f"HTTP {e.code}: {e.read().decode(errors='replace')[:200]}"
+            data = urllib.parse.urlencode(
+                {
+                    "chat_id": tc,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": "true",
+                }
+            ).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=data, headers={"User-Agent": "EveryCryptoBot/3.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                info["status"] = resp.status
                 details["attempts"].append(info)
-            except Exception as e:
-                info["error"] = str(e)
-                details["attempts"].append(info)
+                if resp.status == 200:
+                    return True, details
+        except urllib.error.HTTPError as e:
+            info["error"] = f"HTTP {e.code}: {e.read().decode(errors='replace')[:200]}"
+            details["attempts"].append(info)
+        except Exception as e:
+            info["error"] = str(e)
+            details["attempts"].append(info)
     return False, details
 
 
