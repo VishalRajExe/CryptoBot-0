@@ -6,6 +6,8 @@ from .vwap_breakout import VwapBreakout
 from .binh_cluc import BinHCluc
 from .supertrend import Supertrend
 from .smooth_scalp import SmoothScalp
+from .rsi_bb_squeeze import RsiBbSqueeze
+from .ema_rsi_scalper import EmaRsiScalper
 
 STRATEGY_REGISTRY = {
     "ScalpMacdRsi": ScalpMacdRsi,
@@ -14,6 +16,8 @@ STRATEGY_REGISTRY = {
     "BinHCluc": BinHCluc,
     "Supertrend": Supertrend,
     "SmoothScalp": SmoothScalp,
+    "RsiBbSqueeze": RsiBbSqueeze,
+    "EmaRsiScalper": EmaRsiScalper,
 }
 
 __all__ = [
@@ -24,5 +28,7 @@ __all__ = [
     "BinHCluc",
     "Supertrend",
     "SmoothScalp",
+    "RsiBbSqueeze",
+    "EmaRsiScalper",
     "STRATEGY_REGISTRY"
 ]

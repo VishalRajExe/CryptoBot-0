@@ -1,19 +1,21 @@
 """
-EveryCryptoBot – Multi-Asset Autonomous Trading Engine with SQLite Memory & AI Learner
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Runs multiple cryptos in parallel threads with individual quantitative strategies.
-BTC/USD is managed separately by alpaca_btc_bot.py.
+EveryCryptoBot - Multi-Asset Autonomous Trading Engine v3.0
+===========================================================
+11 crypto assets running in parallel, each with the best-in-class
+strategy calibrated for its volatility profile.
 
-Key Architecture Features:
-1. SQLite Trade Memory (trading_memory.db with WAL mode):
-   - ACID-compliant persistence surviving system restarts and crashes.
-   - Ground-truth Alpaca reconciliation on boot: instantly recovers open positions.
-2. Machine Learning Trade Learner (scikit-learn):
-   - Pre-trained on historical backtests and live trading telemetry.
-   - Predicts win probability on candidate signals; vetoes high-risk setups.
-3. Adaptive Risk & Circuit Breaker:
-   - Tracks consecutive losses per asset.
-   - Triggers automated cooling periods and scales position sizes dynamically.
+Strategy assignment research:
+- GitHub: freqtrade-strategies (NachE, quickfingers123, iterativv, paulcpk)
+- Reddit r/algotrading top posts 2023-2024
+- 22 backtest JSON files in backtests/ directory
+
+Key changes vs v2:
+- No profit-goal pressure: bots trade freely to maximise PnL
+- 11 assets (added LTC, XRP, UNI, MATIC) for more signal diversity
+- Best-in-class strategy per coin (not one-size-fits-all)
+- Up to 5 concurrent positions (was 3)
+- EmaRsiScalper fires on pullbacks (far more active than ScalpMacdRsi)
+- RsiBbSqueeze captures squeeze-explode patterns on volatile coins
 """
 
 from __future__ import annotations
@@ -28,7 +30,6 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict, Any, List
-
 
 if sys.platform == "win32":
     try:
@@ -48,13 +49,14 @@ from alpaca.trading.requests import MarketOrderRequest
 
 from learner import TradeLearner
 from memory import TradeMemory
-from strategies import BinHCluc, MomentumEmaRibbon, ScalpMacdRsi, SmoothScalp, Supertrend, VwapBreakout
+from strategies import (BinHCluc, EmaRsiScalper, MomentumEmaRibbon, RsiBbSqueeze,
+                        ScalpMacdRsi, SmoothScalp, Supertrend, VwapBreakout)
 
 load_dotenv()
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  CONFIGURATION
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# CONFIGURATION
+# ---------------------------------------------------------------------------
 API_KEY    = os.getenv("ALPACA_API_KEY", "")
 API_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
 PAPER      = os.getenv("ALPACA_PAPER", "true").lower() == "true"
@@ -63,71 +65,45 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_ENABLED   = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
 
-BASE_STAKE_USD = float(os.getenv("STAKE_USD_ALT", "25.0"))   # baseline micro stake per trade ($100 account)
+BASE_STAKE_USD           = float(os.getenv("STAKE_USD_ALT", "15.0"))
+MAX_CONCURRENT_POSITIONS = int(os.getenv("MAX_POSITIONS", "5"))
 
-# Asset → Strategy mapping (Calibrated for Maximum Win Rate & Profit Factor)
+# ---------------------------------------------------------------------------
+# ASSET -> STRATEGY MAPPING  (best-in-class per coin)
+#
+# Rationale:
+#  BTC/SOL/MATIC -> EmaRsiScalper  : trend-following, fires on RSI pullbacks
+#  ETH/UNI      -> BinHCluc        : mean reversion BB dip-hunter (2.59 PF)
+#  DOGE/AVAX/XRP-> RsiBbSqueeze    : meme/squeeze-explode patterns
+#  LINK         -> VwapBreakout    : VWAP-anchored momentum
+#  AAVE         -> MomentumEmaRibbon: DeFi full-ribbon trend
+#  LTC          -> SmoothScalp     : BTC-correlated smooth entry
+# ---------------------------------------------------------------------------
 ASSET_CONFIG = {
-    "BTC/USD": {
-        "strategy": ScalpMacdRsi,      # 1-minute turbo scalping on Bitcoin anchor
-        "timeframe_minutes": 1,
-        "poll_secs": 20,
-        "days_history": 2,
-        "emoji": "₿",
-    },
-    "ETH/USD": {
-        "strategy": BinHCluc,          # Proven 2.59 PF / 6.20 Sharpe on Ethereum
-        "timeframe_minutes": 5,
-        "poll_secs": 35,
-        "days_history": 4,
-        "emoji": "🔷",
-    },
-    "SOL/USD": {
-        "strategy": ScalpMacdRsi,      # 1.39 PF / 2.42 Sharpe on Solana micro-momentum
-        "timeframe_minutes": 1,
-        "poll_secs": 25,
-        "days_history": 2,
-        "emoji": "☀️",
-    },
-    "DOGE/USD": {
-        "strategy": ScalpMacdRsi,      # 1.42 PF / 2.38 Sharpe on meme volatility surges
-        "timeframe_minutes": 1,
-        "poll_secs": 25,
-        "days_history": 2,
-        "emoji": "🐶",
-    },
-    "LINK/USD": {
-        "strategy": VwapBreakout,      # 1.40 PF / 2.20 Sharpe on anchored VWAP expansion
-        "timeframe_minutes": 5,
-        "poll_secs": 45,
-        "days_history": 4,
-        "emoji": "🔗",
-    },
-    "AAVE/USD": {
-        "strategy": VwapBreakout,      # 1.46 PF / 2.61 Sharpe on DeFi momentum breakout
-        "timeframe_minutes": 5,
-        "poll_secs": 45,
-        "days_history": 4,
-        "emoji": "👻",
-    },
-    "AVAX/USD": {
-        "strategy": MomentumEmaRibbon, # 1.20 PF on Avalanche intraday expansion
-        "timeframe_minutes": 5,
-        "poll_secs": 35,
-        "days_history": 4,
-        "emoji": "🔺",
-    },
+    "BTC/USD":  {"strategy": EmaRsiScalper,     "timeframe_minutes": 3,  "poll_secs": 20, "days_history": 3, "emoji": "BTC"},
+    "ETH/USD":  {"strategy": BinHCluc,          "timeframe_minutes": 5,  "poll_secs": 30, "days_history": 4, "emoji": "ETH"},
+    "SOL/USD":  {"strategy": EmaRsiScalper,     "timeframe_minutes": 5,  "poll_secs": 30, "days_history": 3, "emoji": "SOL"},
+    "DOGE/USD": {"strategy": RsiBbSqueeze,      "timeframe_minutes": 5,  "poll_secs": 30, "days_history": 3, "emoji": "DOGE"},
+    "LINK/USD": {"strategy": VwapBreakout,      "timeframe_minutes": 5,  "poll_secs": 40, "days_history": 4, "emoji": "LINK"},
+    "AAVE/USD": {"strategy": MomentumEmaRibbon, "timeframe_minutes": 5,  "poll_secs": 45, "days_history": 4, "emoji": "AAVE"},
+    "AVAX/USD": {"strategy": RsiBbSqueeze,      "timeframe_minutes": 5,  "poll_secs": 35, "days_history": 3, "emoji": "AVAX"},
+    "LTC/USD":  {"strategy": SmoothScalp,       "timeframe_minutes": 5,  "poll_secs": 40, "days_history": 3, "emoji": "LTC"},
+    "XRP/USD":  {"strategy": RsiBbSqueeze,      "timeframe_minutes": 5,  "poll_secs": 30, "days_history": 3, "emoji": "XRP"},
+    "UNI/USD":  {"strategy": BinHCluc,          "timeframe_minutes": 5,  "poll_secs": 45, "days_history": 4, "emoji": "UNI"},
+    "MATIC/USD":{"strategy": EmaRsiScalper,     "timeframe_minutes": 5,  "poll_secs": 35, "days_history": 3, "emoji": "MATIC"},
 }
 
 TF_MAP = {
     1:  TimeFrame(1,  TimeFrameUnit.Minute),
+    3:  TimeFrame(3,  TimeFrameUnit.Minute),
     5:  TimeFrame(5,  TimeFrameUnit.Minute),
     15: TimeFrame(15, TimeFrameUnit.Minute),
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  LOGGING
-# ─────────────────────────────────────────────────────────────────────────────
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+# ---------------------------------------------------------------------------
+# LOGGING
+# ---------------------------------------------------------------------------
+LOG_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 _log_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -135,16 +111,13 @@ _log_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 def _make_logger(symbol: str) -> logging.Logger:
     safe = symbol.replace("/", "")
     name = f"ECB.{safe}"
-    log = logging.getLogger(name)
+    log  = logging.getLogger(name)
     if log.handlers:
         return log
     log.setLevel(logging.INFO)
     fmt = logging.Formatter(f"%(asctime)s | %(levelname)8s | [{safe}] %(message)s",
                             datefmt="%Y-%m-%d %H:%M:%S")
-    fh = logging.FileHandler(
-        os.path.join(LOG_DIR, f"{safe}_{_log_stamp}.log"),
-        encoding="utf-8"
-    )
+    fh = logging.FileHandler(os.path.join(LOG_DIR, f"{safe}_{_log_stamp}.log"), encoding="utf-8")
     fh.setFormatter(fmt)
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
@@ -153,72 +126,51 @@ def _make_logger(symbol: str) -> logging.Logger:
     return log
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  TELEGRAM
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# TELEGRAM
+# ---------------------------------------------------------------------------
 def send_telegram_detailed(text: str, chat_id: Optional[str] = None) -> tuple[bool, dict]:
     enabled = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
-    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"") or "8766601647:AAGu0Q1MzS6fMTvW3OW7_0WZGiIxgYq748c"
-    primary_target = (chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip().strip("'\"") or "8842786135"
+    token   = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip('\'"') or "8766601647:AAGu0Q1MzS6fMTvW3OW7_0WZGiIxgYq748c"
+    primary = (chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip().strip('\'"') or "8842786135"
 
-    details = {
-        "enabled": enabled,
-        "token_prefix": (token[:6] + "...") if len(token) >= 6 else "SHORT",
-        "token_suffix": ("..." + token[-4:]) if len(token) >= 4 else "SHORT",
-        "token_length": len(token),
-        "primary_target": primary_target,
-        "attempts": []
-    }
+    details = {"enabled": enabled, "token_length": len(token),
+               "primary_target": primary, "attempts": []}
 
     if not enabled:
         details["error"] = "TELEGRAM_ENABLED is false"
         return False, details
 
-    VERIFIED_TOKEN = "8766601647:AAGu0Q1MzS6fMTvW3OW7_0WZGiIxgYq748c"
-    VERIFIED_CHAT = "8842786135"
+    VTOK = "8766601647:AAGu0Q1MzS6fMTvW3OW7_0WZGiIxgYq748c"
+    VCHAT = "8842786135"
+    tokens  = [token] + ([VTOK] if token != VTOK else [])
+    targets = [primary] + ([VCHAT] if VCHAT not in [primary] else [])
 
-    tokens_to_try = [token]
-    if token != VERIFIED_TOKEN:
-        tokens_to_try.append(VERIFIED_TOKEN)
-
-    targets_to_try = [primary_target]
-    if VERIFIED_CHAT not in targets_to_try:
-        targets_to_try.append(VERIFIED_CHAT)
-
-    for tok in tokens_to_try:
-        for target in targets_to_try:
-            target_clean = str(target).strip().strip("'\"")
-            attempt_info = {"token": tok[:6] + "...", "target": target_clean}
+    for tok in tokens:
+        for tgt in targets:
+            tc = str(tgt).strip().strip('\'"')
+            info = {"token": tok[:6] + "...", "target": tc}
             try:
-                import urllib.parse
-                import urllib.request
+                import urllib.parse, urllib.request
                 url = f"https://api.telegram.org/bot{tok}/sendMessage"
-                payload = urllib.parse.urlencode({
-                    "chat_id": target_clean,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": "true",
+                data = urllib.parse.urlencode({
+                    "chat_id": tc, "text": text,
+                    "parse_mode": "HTML", "disable_web_page_preview": "true",
                 }).encode("utf-8")
-                req = urllib.request.Request(
-                    url, data=payload,
-                    headers={"User-Agent": "EveryCryptoBot/2.0"}
-                )
+                req = urllib.request.Request(url, data=data,
+                                             headers={"User-Agent": "EveryCryptoBot/3.0"})
                 with urllib.request.urlopen(req, timeout=10) as resp:
-                    attempt_info["status"] = resp.status
-                    details["attempts"].append(attempt_info)
+                    info["status"] = resp.status
+                    details["attempts"].append(info)
                     if resp.status == 200:
                         return True, details
             except urllib.error.HTTPError as e:
-                attempt_info["error"] = f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"
-                details["attempts"].append(attempt_info)
-                print(f"⚠️ Telegram delivery with {tok[:6]} to {target_clean} failed: {attempt_info['error']}")
+                info["error"] = f"HTTP {e.code}: {e.read().decode(errors='replace')[:200]}"
+                details["attempts"].append(info)
             except Exception as e:
-                attempt_info["error"] = str(e)
-                details["attempts"].append(attempt_info)
-                print(f"⚠️ Telegram delivery to {target_clean} failed: {e}")
-
+                info["error"] = str(e)
+                details["attempts"].append(info)
     return False, details
-
 
 
 def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
@@ -226,22 +178,19 @@ def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
     return success
 
 
-
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  SHARED MEMORY & LIVE STATE
-# ─────────────────────────────────────────────────────────────────────────────
-memory = TradeMemory()
+# ---------------------------------------------------------------------------
+# SHARED MEMORY & LIVE STATE
+# ---------------------------------------------------------------------------
+memory  = TradeMemory()
 learner = TradeLearner()
 
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "multi_state.json")
+STATE_FILE     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "multi_state.json")
 DASHBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard", "live_state.json")
-_dashboard_state = {}
+_dashboard_state: dict = {}
 _dash_lock = threading.Lock()
 
 
-def update_dashboard(symbol: str, data: dict):
+def update_dashboard(symbol: str, data: dict) -> None:
     with _dash_lock:
         _dashboard_state[symbol] = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
         try:
@@ -249,70 +198,55 @@ def update_dashboard(symbol: str, data: dict):
                 json.dump(_dashboard_state, f, indent=2, default=str)
         except Exception:
             pass
-
-        # If BTC/USD, also synchronize alpaca_state.json for the master Bitcoin panel
         if symbol == "BTC/USD":
-            try:
-                btc_data = {
-                    "position": data.get("position"),
-                    "trades": [],
-                    "total_pnl": data.get("total_pnl", 0.0)
-                }
-                for path in [
-                    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "user_data", "alpaca_state.json")),
-                    os.path.join(os.path.dirname(__file__), "alpaca_state.json")
-                ]:
+            btc = {"position": data.get("position"), "trades": [], "total_pnl": data.get("total_pnl", 0.0)}
+            for path in [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "user_data", "alpaca_state.json")),
+                os.path.join(os.path.dirname(__file__), "alpaca_state.json"),
+            ]:
+                try:
                     with open(path, "w", encoding="utf-8") as f:
-                        json.dump(btc_data, f, indent=2, default=str)
-            except Exception:
-                pass
+                        json.dump(btc, f, indent=2, default=str)
+                except Exception:
+                    pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  ASSET BOT WORKER
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# ASSET BOT WORKER
+# ---------------------------------------------------------------------------
 class AssetBot:
     def __init__(self, symbol: str, config: dict):
-        self.symbol  = symbol
-        self.config  = config
-        self.emoji   = config["emoji"]
-        self.log     = _make_logger(symbol)
-
+        self.symbol   = symbol
+        self.config   = config
+        self.emoji    = config["emoji"]
+        self.log      = _make_logger(symbol)
         self.strategy = config["strategy"](symbol=symbol)
         self.tf_min   = config["timeframe_minutes"]
         self.tf       = TF_MAP[self.tf_min]
         self.poll     = config["poll_secs"]
         self.days_h   = config["days_history"]
-
         self.trading  = TradingClient(API_KEY, API_SECRET, paper=PAPER)
         self.data_cl  = CryptoHistoricalDataClient(API_KEY, API_SECRET)
         self.memory   = memory
         self.learner  = learner
-
-        # Reconcile open positions with Alpaca ground-truth on startup
         self.reconcile_position()
-
-        self.log.info("Initialized Strategy=%s TF=%dm Poll=%ds BaseStake=$%.2f",
-                      self.strategy.NAME, self.tf_min, self.poll, BASE_STAKE_USD)
+        self.log.info("Initialized Strategy=%s TF=%dm Poll=%ds MaxPos=%d",
+                      self.strategy.NAME, self.tf_min, self.poll, MAX_CONCURRENT_POSITIONS)
 
     def reconcile_position(self) -> Optional[dict]:
-        """Adopts any active position from Alpaca directly into memory on boot."""
         pos = self.memory.reconcile_with_alpaca(self.trading, self.symbol)
         if pos:
-            self.log.info("🎯 ADOPTED EXISTING POSITION: Qty=%.6f @ $%.4f (SL=$%.4f TP=$%.4f)",
-                          pos["qty"], pos["entry_price"], pos["stop_loss"], pos["take_profit"])
+            self.log.info("ADOPTED POSITION: Qty=%.6f @ $%.4f", pos["qty"], pos["entry_price"])
         return pos
 
-    # ── Market Data ──────────────────────────────────────────────────────────
+    # -- Market data ----------------------------------------------------------
     def fetch_bars(self, tf_override: Optional[TimeFrame] = None) -> Optional[pd.DataFrame]:
         try:
             end   = datetime.now(timezone.utc)
             start = end - timedelta(days=self.days_h)
-            timeframe = tf_override or self.tf
-            req   = CryptoBarsRequest(symbol_or_symbols=self.symbol,
-                                      timeframe=timeframe, start=start, end=end)
-            bars  = self.data_cl.get_crypto_bars(req)
-            df    = bars.df
+            tf    = tf_override or self.tf
+            req   = CryptoBarsRequest(symbol_or_symbols=self.symbol, timeframe=tf, start=start, end=end)
+            df    = self.data_cl.get_crypto_bars(req).df
             if df.empty:
                 return None
             if isinstance(df.index, pd.MultiIndex):
@@ -326,171 +260,116 @@ class AssetBot:
 
     def get_price(self) -> Optional[float]:
         try:
-            req   = CryptoLatestQuoteRequest(symbol_or_symbols=self.symbol)
-            resp  = self.data_cl.get_crypto_latest_quote(req)
-            quote = resp[self.symbol]
-            return float(quote.ask_price)
+            resp  = self.data_cl.get_crypto_latest_quote(CryptoLatestQuoteRequest(symbol_or_symbols=self.symbol))
+            return float(resp[self.symbol].ask_price)
         except Exception:
             return None
 
     def get_position_qty(self) -> float:
         try:
-            pos = self.trading.get_open_position(self.symbol.replace("/", ""))
-            return float(pos.qty)
+            return float(self.trading.get_open_position(self.symbol.replace("/", "")).qty)
         except Exception:
             return 0.0
 
     def get_cash(self) -> float:
         try:
-            acct = self.trading.get_account()
-            return float(acct.cash)
+            return float(self.trading.get_account().cash)
         except Exception:
             return 0.0
 
+    # -- Position sizing ------------------------------------------------------
     def calculate_stake(self) -> float:
         """
-        Micro-account dynamic stake calculator:
-        Designed for $100 starting balance compounding to achieve $50 profit.
-        Supports multi-asset concurrent trading (up to 3 concurrent slots)
-        across all trained assets (BTC, ETH, SOL, DOGE, LINK, AAVE, AVAX).
+        Dynamic stake per trade.
+        - Up to MAX_CONCURRENT_POSITIONS slots across all assets.
+        - Each slot gets an equal share of available cash scaled by risk multiplier.
+        - Min $10.50 (Alpaca crypto minimum), Max $30 per trade.
         """
-        cash = self.get_cash()
-        reserve = max(2.0, cash * 0.05)
-        available = max(0.0, cash - reserve)
-
-        active_positions = self.memory.get_active_positions()
-        num_pos = len(active_positions)
-        if num_pos >= 3:
+        cash      = self.get_cash()
+        available = max(0.0, cash - max(2.0, cash * 0.04))
+        num_pos   = len(self.memory.get_active_positions())
+        if num_pos >= MAX_CONCURRENT_POSITIONS:
             return 0.0
-
-        slots = max(1, 3 - num_pos)
-        target = available / slots
-
+        slots     = max(1, MAX_CONCURRENT_POSITIONS - num_pos)
+        target    = available / slots
         risk_mult = self.memory.get_risk_multiplier(self.symbol)
-        raw_stake = target * risk_mult
+        raw       = target * risk_mult
+        if available >= 10.50:
+            return round(min(max(raw, 10.50), min(available, 30.0)), 2)
+        return 0.0
 
-        MIN_ORDER_USD = 10.50
-        if available >= MIN_ORDER_USD:
-            stake = min(max(raw_stake, MIN_ORDER_USD), min(available, 45.0))
-        else:
-            stake = 0.0
-        return round(stake, 2)
-
+    # -- Adaptive timeframe ---------------------------------------------------
     def get_adaptive_timeframe(self, df: pd.DataFrame, price: float) -> Tuple[TimeFrame, int, str]:
-        """
-        Dynamically adjusts candle resolution based on current market volatility:
-        - High Volatility Expansion (ATR% > 1.4% or Volume Spike): Scalp mode (1m)
-        - Low Volatility Chop (ATR% < 0.6% and ADX < 20): Filter mode (15m) to prevent fee churn
-        - Normal Regime: Base calibrated timeframe
-        """
         try:
             if df is None or len(df) < 14:
                 return self.tf, self.tf_min, f"{self.tf_min}m"
-
-            last = df.iloc[-1]
-            atr = float(last.get("atr", 1.0)) if "atr" in df.columns else 1.0
-            atr_pct = (atr / price * 100.0) if price > 0 else 1.0
+            last      = df.iloc[-1]
+            atr       = float(last.get("atr", 1.0)) if "atr" in df.columns else 1.0
+            atr_pct   = (atr / price * 100.0) if price > 0 else 1.0
             vol_ratio = float(last.get("vol_ratio", 1.0)) if "vol_ratio" in df.columns else 1.0
-            adx = float(last.get("adx", 25.0)) if "adx" in df.columns else 25.0
-
+            adx       = float(last.get("adx", 25.0)) if "adx" in df.columns else 25.0
             if atr_pct > 1.4 or vol_ratio > 1.8:
-                return TF_MAP[1], 1, "1m (High-Vol Scalp)"
-            elif atr_pct < 0.6 and adx < 20:
+                ftf = min(self.tf_min, 3)
+                return TF_MAP.get(ftf, self.tf), ftf, f"{ftf}m (High-Vol Scalp)"
+            if atr_pct < 0.6 and adx < 20:
                 return TF_MAP[15], 15, "15m (Low-Vol Filter)"
-            else:
-                return self.tf, self.tf_min, f"{self.tf_min}m (Standard)"
+            return self.tf, self.tf_min, f"{self.tf_min}m (Standard)"
         except Exception:
             return self.tf, self.tf_min, f"{self.tf_min}m"
 
-    # ── Orders & Execution ───────────────────────────────────────────────────
+    # -- Orders ---------------------------------------------------------------
     def buy(self, price: float, sl: float, tp: float, features: dict) -> bool:
-        # Check cooling period (mistake learning prevention)
         if self.memory.is_in_cooldown(self.symbol):
-            self.log.warning("⏸️ COOL-DOWN ACTIVE: Skipping BUY on %s after consecutive losses.", self.symbol)
+            self.log.warning("COOL-DOWN: Skipping BUY on %s", self.symbol)
             return False
-
-        # Micro-account dynamic position sizing (Alpaca minimum crypto order is $10.00)
-        active_stake = self.calculate_stake()
-        cash = self.get_cash()
-        if cash < active_stake or active_stake < 10.0:
-            self.log.warning("Insufficient cash $%.2f for minimum order $%.2f", cash, active_stake)
+        stake = self.calculate_stake()
+        cash  = self.get_cash()
+        if cash < stake or stake < 10.0:
+            self.log.warning("Insufficient cash $%.2f for order $%.2f", cash, stake)
             return False
-
-        qty = round(active_stake / price, 6)
-        if qty <= 0:
-            return False
-
-        risk_mult = self.memory.get_risk_multiplier(self.symbol)
-
+        qty      = round(stake / price, 6)
+        risk_mul = self.memory.get_risk_multiplier(self.symbol)
         try:
             order = self.trading.submit_order(MarketOrderRequest(
-                symbol=self.symbol.replace("/", ""),
-                qty=qty, side=OrderSide.BUY,
-                time_in_force=TimeInForce.GTC,
-            ))
-            # Persist to SQLite Memory
-            self.memory.save_position(
-                symbol=self.symbol,
-                order_id=str(order.id),
-                qty=qty,
-                entry_price=price,
-                stop_loss=sl,
-                take_profit=tp,
-                strategy=self.strategy.NAME,
-                features=features
-            )
-            self.log.info("BUY %.6f %s @ $%.4f (Stake: $%.2f, RiskMult: %.2fx) | SL=$%.4f TP=$%.4f",
-                          qty, self.symbol, price, active_stake, risk_mult, sl, tp)
-            self._notify_buy(qty, price, sl, tp, active_stake, risk_mult)
+                symbol=self.symbol.replace("/", ""), qty=qty,
+                side=OrderSide.BUY, time_in_force=TimeInForce.GTC))
+            self.memory.save_position(symbol=self.symbol, order_id=str(order.id), qty=qty,
+                entry_price=price, stop_loss=sl, take_profit=tp,
+                strategy=self.strategy.NAME, features=features)
+            self.log.info("BUY %.6f %s @ $%.4f  stake=$%.2f  SL=$%.4f  TP=$%.4f",
+                          qty, self.symbol, price, stake, sl, tp)
+            self._notify_buy(qty, price, sl, tp, stake, risk_mul)
             return True
         except Exception as e:
-            self.log.error("BUY order failed: %s", e)
+            self.log.error("BUY failed: %s", e)
             return False
 
     def sell(self, price: float, reason: str = "signal", features: Optional[dict] = None) -> bool:
-        pos = self.memory.get_position(self.symbol)
+        pos     = self.memory.get_position(self.symbol)
         pos_qty = self.get_position_qty()
         if pos_qty <= 0:
             self.memory.remove_position(self.symbol)
             return False
-
         try:
             self.trading.submit_order(MarketOrderRequest(
-                symbol=self.symbol.replace("/", ""),
-                qty=pos_qty, side=OrderSide.SELL,
-                time_in_force=TimeInForce.GTC,
-            ))
-            ep = pos.get("entry_price", price) if pos else price
-            qty = pos.get("qty", pos_qty) if pos else pos_qty
+                symbol=self.symbol.replace("/", ""), qty=pos_qty,
+                side=OrderSide.SELL, time_in_force=TimeInForce.GTC))
+            ep         = pos.get("entry_price", price) if pos else price
+            qty        = pos.get("qty", pos_qty) if pos else pos_qty
             entry_time = pos.get("entry_time", "") if pos else ""
-            in_features = json.loads(pos.get("features_json", "{}")) if pos and pos.get("features_json") else (features or {})
-
-            # Record in SQLite and update learning metrics
-            learning = self.memory.record_closed_trade(
-                symbol=self.symbol,
-                strategy=self.strategy.NAME,
-                qty=qty,
-                entry_price=ep,
-                exit_price=price,
-                entry_time=entry_time,
-                reason=reason,
-                features=in_features
-            )
-
-            pnl = learning["pnl"]
-            pnl_pct = learning["pnl_pct"]
-            is_win = learning["is_win"]
-
-            # Retrain ML model online immediately with real trade outcome & pnl
-            self.learner.record_online_sample(in_features, is_win, pnl=pnl)
-
-            self.log.info("SELL [%s] %.6f %s @ $%.4f | PnL $%.4f (%.2f%%) | %s | RiskMult=%.2fx",
-                          "WIN" if is_win else "LOSS", qty, self.symbol,
-                          price, pnl, pnl_pct, reason, learning["risk_multiplier"])
+            feats      = json.loads(pos.get("features_json", "{}")) if pos and pos.get("features_json") else (features or {})
+            learning   = self.memory.record_closed_trade(
+                symbol=self.symbol, strategy=self.strategy.NAME, qty=qty,
+                entry_price=ep, exit_price=price, entry_time=entry_time,
+                reason=reason, features=feats)
+            pnl, pnl_pct, is_win = learning["pnl"], learning["pnl_pct"], learning["is_win"]
+            self.learner.record_online_sample(feats, is_win, pnl=pnl)
+            self.log.info("SELL [%s] %.6f %s @ $%.4f  PnL=$%.4f (%.2f%%)  %s",
+                          "WIN" if is_win else "LOSS", qty, self.symbol, price, pnl, pnl_pct, reason)
             self._notify_sell(qty, price, ep, pnl, pnl_pct, reason, learning)
             return True
         except Exception as e:
-            self.log.error("SELL order failed: %s", e)
+            self.log.error("SELL failed: %s", e)
             return False
 
     def check_exit(self, price: float, features: dict) -> bool:
@@ -500,313 +379,251 @@ class AssetBot:
         sl  = pos.get("stop_loss", 0.0)
         tp  = pos.get("take_profit", float("inf"))
         ep  = pos.get("entry_price", price)
-        pnl_pct = ((price - ep) / ep * 100.0) if ep > 0 else 0.0
+        pct = ((price - ep) / ep * 100.0) if ep > 0 else 0.0
         atr = float(features.get("atr", 1.0))
 
-        # 1. Breakeven Lock: Once trade reaches +0.40% profit, raise SL to entry + 0.05%
-        be_target = round(ep * 1.0005, 4)
-        if pnl_pct >= 0.40 and sl < be_target:
-            self.memory.update_stop_loss(self.symbol, be_target)
-            self.log.info("🛡️ BREAKEVEN ACTIVATED on %s: Raised SL to $%.4f (Gain: +%.2f%%)",
-                          self.symbol, be_target, pnl_pct)
-            sl = be_target
-
-        # 2. Dynamic Trailing Stop: Once trade reaches +0.80% profit, trail peak by 0.8x ATR
-        if pnl_pct >= 0.80 and atr > 0:
-            trail_sl = round(price - (0.8 * atr), 4)
-            if trail_sl > sl:
-                self.memory.update_stop_loss(self.symbol, trail_sl)
-                self.log.info("📈 TRAILING STOP UPDATED on %s: Raised SL to $%.4f (Gain: +%.2f%%)",
-                              self.symbol, trail_sl, pnl_pct)
-                sl = trail_sl
-
-        # 3. Stop-Loss Trigger
+        # Breakeven at +0.4%
+        be = round(ep * 1.0005, 4)
+        if pct >= 0.40 and sl < be:
+            self.memory.update_stop_loss(self.symbol, be)
+            self.log.info("BREAKEVEN @ $%.4f  gain=+%.2f%%", be, pct)
+            sl = be
+        # Trailing at +0.8%
+        if pct >= 0.80 and atr > 0:
+            trail = round(price - 0.8 * atr, 4)
+            if trail > sl:
+                self.memory.update_stop_loss(self.symbol, trail)
+                sl = trail
         if price <= sl:
-            self.log.warning("STOP-LOSS hit @ $%.4f (SL=$%.4f)", price, sl)
+            self.log.warning("SL HIT @ $%.4f", price)
             self.sell(price, reason="stop_loss", features=features)
             return True
-
-        # 4. Take-Profit Trigger
         if price >= tp:
-            self.log.info("TAKE-PROFIT hit @ $%.4f (TP=$%.4f)", price, tp)
+            self.log.info("TP HIT @ $%.4f", price)
             self.sell(price, reason="take_profit", features=features)
             return True
         return False
 
-    # ── Trading Loop ─────────────────────────────────────────────────────────
-    def run(self):
-        self.log.info("Starting persistent trading loop for %s", self.symbol)
+    # -- Main loop ------------------------------------------------------------
+    def run(self) -> None:
+        self.log.info("Starting trading loop for %s", self.symbol)
         self._notify_startup()
         cycle = 0
-
         while True:
             try:
                 cycle += 1
                 self.log.info("=== Cycle #%d | %s ===", cycle,
                               datetime.now(timezone.utc).strftime("%H:%M:%S UTC"))
-
                 df = self.fetch_bars()
                 if df is None or len(df) < self.strategy.MIN_CANDLES:
-                    self.log.warning("Waiting for data (%d bars, need %d). Sleeping %ds...",
-                                     0 if df is None else len(df),
-                                     self.strategy.MIN_CANDLES, self.poll)
+                    self.log.warning("Need %d bars, have %d. Sleeping...",
+                                     self.strategy.MIN_CANDLES, 0 if df is None else len(df))
                     time.sleep(self.poll)
                     continue
 
-                df      = self.strategy.add_indicators(df)
-                price   = self.get_price() or float(df["close"].iloc[-1])
+                df    = self.strategy.add_indicators(df)
+                price = self.get_price() or float(df["close"].iloc[-1])
+                _, _, tf_label = self.get_adaptive_timeframe(df, price)
 
-                # Evaluate market volatility and select adaptive timeframe
-                adaptive_tf, adaptive_tf_min, tf_label = self.get_adaptive_timeframe(df, price)
-
-                # Extract indicator vector for AI learning
                 last = df.iloc[-1]
-                indicators = {}
+                indicators: dict = {}
                 for col in ["rsi", "macd", "macd_signal", "macd_hist", "ema200",
                             "ema55", "ema21", "ema13", "ema8", "vwap", "atr", "vol_ratio", "adx"]:
-                    if col in df.columns:
-                        v = last[col]
-                        if pd.notna(v):
-                            indicators[col] = round(float(v), 4)
+                    if col in df.columns and pd.notna(last[col]):
+                        indicators[col] = round(float(last[col]), 4)
 
                 features = {
-                    "rsi": indicators.get("rsi", 50.0),
-                    "macd_hist": indicators.get("macd_hist", 0.0),
-                    "atr": indicators.get("atr", 1.0),
-                    "price": price,
-                    "vol_ratio": indicators.get("vol_ratio", 1.0),
-                    "adx": indicators.get("adx", 25.0),
-                    "ema200": indicators.get("ema200", price),
+                    "rsi":       indicators.get("rsi",       50.0),
+                    "macd_hist": indicators.get("macd_hist",  0.0),
+                    "atr":       indicators.get("atr",        1.0),
+                    "price":     price,
+                    "vol_ratio": indicators.get("vol_ratio",  1.0),
+                    "adx":       indicators.get("adx",       25.0),
+                    "ema200":    indicators.get("ema200",    price),
                 }
 
-                # Check Stop-loss / Take-profit exits
                 exited  = self.check_exit(price, features)
                 result  = self.strategy.get_signal(df, price)
                 pos     = self.memory.get_position(self.symbol)
+                unreal  = ((price - pos["entry_price"]) * pos["qty"]) if pos else 0.0
 
-                # Unrealized PnL calculation
-                unreal = 0.0
-                if pos:
-                    unreal = (price - pos["entry_price"]) * pos["qty"]
-
-                # AI Learner Evaluation
-                ai_approved, win_prob, ai_reason = self.learner.evaluate_signal(self.symbol, features)
-                cooling_active = self.memory.is_in_cooldown(self.symbol)
+                ai_ok, win_prob, ai_reason = self.learner.evaluate_signal(self.symbol, features)
+                cooling   = self.memory.is_in_cooldown(self.symbol)
                 risk_mult = self.memory.get_risk_multiplier(self.symbol)
 
-                self.log.info("Price=$%.4f [%s] | Signal=%s | AI: %.0f%% win prob | PnL_Unreal=$%.2f | RiskMult=%.2fx",
+                self.log.info("$%.4f [%s] | %s | AI=%.0f%% | Unreal=$%.2f | Risk=%.2fx",
                               price, tf_label, result.signal, win_prob * 100, unreal, risk_mult)
 
-                # Push real-time state to Dashboard
                 update_dashboard(self.symbol, {
-                    "symbol": self.symbol,
-                    "strategy": self.strategy.NAME,
-                    "emoji": self.emoji,
-                    "timeframe": tf_label,
-                    "price": price,
-                    "signal": result.signal,
-                    "reason": result.reason,
-                    "confidence": result.confidence,
-                    "indicators": indicators,
-                    "position": pos,
-                    "unrealized_pnl": round(unreal, 4),
-                    "ai_approved": ai_approved,
-                    "ai_prob": round(win_prob, 2),
-                    "ai_reason": ai_reason,
-                    "cooling_active": cooling_active,
-                    "risk_multiplier": risk_mult,
-                    "cycle": cycle,
+                    "symbol": self.symbol, "strategy": self.strategy.NAME,
+                    "emoji": self.emoji, "timeframe": tf_label, "price": price,
+                    "signal": result.signal, "reason": result.reason,
+                    "confidence": result.confidence, "indicators": indicators,
+                    "position": pos, "unrealized_pnl": round(unreal, 4),
+                    "ai_approved": ai_ok, "ai_prob": round(win_prob, 2),
+                    "ai_reason": ai_reason, "cooling_active": cooling,
+                    "risk_multiplier": risk_mult, "cycle": cycle,
                     "total_pnl": round(self.memory.get_symbol_total_pnl(self.symbol), 4),
                 })
 
-                # Telegram cycle update
                 self._notify_cycle(cycle, price, result, pos, unreal, win_prob, risk_mult)
 
-                # Order Execution Logic with AI Safeguards
                 if not exited:
                     has_pos = pos is not None
                     if result.signal == "BUY" and not has_pos:
-                        if not ai_approved:
-                            self.log.warning("🚫 AI LEARNER VETOED BUY: %s", ai_reason)
-                        elif cooling_active:
-                            self.log.warning("⏸️ COOLING CIRCUIT BREAKER ACTIVE: Skipping trade.")
+                        if not ai_ok:
+                            self.log.warning("AI VETOED BUY: %s", ai_reason)
+                        elif cooling:
+                            self.log.warning("COOLING: Skipping.")
                         else:
                             self.buy(price, result.stop_loss, result.take_profit, features)
                     elif result.signal == "SELL" and has_pos:
                         self.sell(price, reason="sell_signal", features=features)
                     elif result.signal == "BUY" and has_pos:
-                        self.log.info("BUY signal confirmed – holding active position.")
+                        self.log.info("BUY confirmed - holding.")
                     else:
-                        self.log.debug("No action required for %s", self.symbol)
+                        self.log.debug("HOLD on %s", self.symbol)
 
                 time.sleep(self.poll)
 
             except Exception as e:
-                self.log.error("Error in %s cycle %d: %s", self.symbol, cycle, e, exc_info=True)
+                self.log.error("Cycle %d error on %s: %s", cycle, self.symbol, e, exc_info=True)
                 time.sleep(self.poll)
 
-    def _notify_startup(self):
+    # -- Telegram notifications (no goal/target references) -------------------
+    def _notify_startup(self) -> None:
         send_telegram(
-            f"{self.emoji} <b>ENGINE LAUNCHED — {self.symbol}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <b>Strategy:</b> {html.escape(self.strategy.NAME)}\n"
-            f"⏱️ <b>Timeframe:</b> {self.tf_min}m (Poll: {self.poll}s)\n"
-            f"🧠 <b>Memory:</b> SQLite WAL active\n"
-            f"🤖 <b>AI Learner:</b> Online Random Forest Guard\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            f"[{self.emoji}] <b>BOT STARTED: {self.symbol}</b>\n"
+            f"Strategy: <b>{html.escape(self.strategy.NAME)}</b>\n"
+            f"Timeframe: {self.tf_min}m  Poll: {self.poll}s\n"
+            f"Max Concurrent Slots: {MAX_CONCURRENT_POSITIONS}\n"
+            f"<i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
-    def _notify_buy(self, qty: float, price: float, sl: float, tp: float, stake: float, risk_mult: float):
-        risk = price - sl
-        reward = tp - price
-        rr = (reward / risk) if risk > 0 else 0.0
+    def _notify_buy(self, qty: float, price: float, sl: float, tp: float,
+                    stake: float, risk_mult: float) -> None:
+        risk   = abs(price - sl)
+        reward = abs(tp - price)
+        rr     = (reward / risk) if risk > 0 else 0.0
         send_telegram(
-            f"🟢 <b>BUY EXECUTED — {self.symbol}</b> {self.emoji}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <b>Strategy:</b> {html.escape(self.strategy.NAME)}\n"
-            f"🔢 <b>Qty:</b> <code>{qty:.6f}</code> | 💵 <b>Stake:</b> ${stake:,.2f} (Risk: {risk_mult:.2f}x)\n"
-            f"💵 <b>Fill Price:</b> ${price:,.4f}\n"
-            f"🛑 <b>Stop Loss:</b> ${sl:,.4f} (-${risk:,.2f})\n"
-            f"🎯 <b>Take Profit:</b> ${tp:,.4f} (+${reward:,.2f}) [R:R {rr:.2f}]\n"
-            f"🧠 <b>Memory:</b> Synced with SQLite & Alpaca\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            f"<b>[BUY] {self.symbol}</b> [{self.emoji}]\n"
+            f"Strategy: {html.escape(self.strategy.NAME)}\n"
+            f"Qty: <code>{qty:.6f}</code>  Stake: ${stake:,.2f}  Risk: {risk_mult:.2f}x\n"
+            f"Fill: <b>${price:,.4f}</b>  SL: ${sl:,.4f}  TP: ${tp:,.4f}\n"
+            f"R:R {rr:.2f}  (-${risk:,.2f} / +${reward:,.2f})\n"
+            f"<i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
-    def _notify_sell(self, qty: float, price: float, ep: float,
-                     pnl: float, pnl_pct: float, reason: str, learning: dict):
-        hdr = {
-            "take_profit": f"🎯 <b>TAKE PROFIT HIT — {self.symbol}</b> 🟢",
-            "stop_loss":   f"🛑 <b>STOP LOSS HIT — {self.symbol}</b> ⚠️",
-        }.get(reason, f"🔴 <b>SELL EXECUTED — {self.symbol}</b>")
-
-        total_pnl = self.memory.get_total_realized_pnl()
-        progress_pct = max(0.0, min(100.0, (total_pnl / 50.0) * 100))
-        cool_line = f"\n⏸️ <b>Cool-down Activated:</b> 20 mins" if learning.get("cooldown_until") else ""
+    def _notify_sell(self, qty: float, price: float, ep: float, pnl: float,
+                     pnl_pct: float, reason: str, learning: dict) -> None:
+        labels = {"take_profit": "[TP HIT]", "stop_loss": "[SL HIT]"}
+        hdr    = labels.get(reason, "[SELL]")
+        total  = self.memory.get_total_realized_pnl()
+        cool   = "\nCooldown: 20 mins" if learning.get("cooldown_until") else ""
+        label  = "WIN" if pnl >= 0 else "LOSS"
+        sign   = "+" if pnl >= 0 else ""
+        tsign  = "+" if total >= 0 else ""
         send_telegram(
-            f"{hdr}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <b>Strategy:</b> {html.escape(self.strategy.NAME)}\n"
-            f"🔢 <b>Qty:</b> <code>{qty:.6f}</code>\n"
-            f"💵 <b>Entry / Exit:</b> ${ep:,.4f} → ${price:,.4f}\n"
-            f"📈 <b>Trade PnL:</b> <b>{'+'if pnl>=0 else ''}${pnl:,.4f} ({pnl_pct:+.2f}%)</b> "
-            f"{'✅ WIN' if pnl>=0 else '❌ LOSS'}\n"
-            f"🧠 <b>AI Adaptation:</b> Consec Losses: {learning['consecutive_losses']} | Risk Mult: {learning['risk_multiplier']:.2f}x{cool_line}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎯 <b>$50 GOAL PROGRESS:</b>\n"
-            f"  • <b>Total Realized Profit:</b> <b>{'+' if total_pnl >= 0 else ''}${total_pnl:,.4f}</b> / <b>+$50.00</b> ({progress_pct:.1f}%)\n"
-            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            f"<b>{hdr} {self.symbol}</b> [{self.emoji}]\n"
+            f"Strategy: {html.escape(self.strategy.NAME)}\n"
+            f"Qty: <code>{qty:.6f}</code>  Entry: ${ep:,.4f}  Exit: ${price:,.4f}\n"
+            f"Trade PnL: <b>{sign}${pnl:,.4f} ({pnl_pct:+.2f}%)</b>  {label}\n"
+            f"Consec Losses: {learning['consecutive_losses']}  Risk Mult: {learning['risk_multiplier']:.2f}x{cool}\n"
+            f"Total PnL: <b>{tsign}${total:,.4f}</b>\n"
+            f"<i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
-    def _notify_cycle(self, cycle: int, price: float, result, pos, unreal: float, win_prob: float, risk_mult: float):
-        # Notify on cycle 1 & 2, continuously when in position, or every 3 cycles (BTC) / 5 cycles (alts)
-        interval = 3 if self.symbol == "BTC/USD" else 5
+    def _notify_cycle(self, cycle: int, price: float, result, pos,
+                      unreal: float, win_prob: float, risk_mult: float) -> None:
+        interval = 3 if self.symbol == "BTC/USD" else 6
         if cycle > 2 and not pos and (cycle % interval != 0):
             return
-
-
-        sig_icon = {"BUY": "🟢", "SELL": "🔴"}.get(result.signal, "🟡")
-        pos_line = (
-            f"💼 LONG <code>{pos['qty']:.6f}</code> @ ${pos['entry_price']:,.4f} | "
-            f"Unreal: {'+'if unreal>=0 else ''}${unreal:,.2f}"
-            if pos else "💼 FLAT"
-        )
-        total_pnl = self.memory.get_total_realized_pnl()
-        progress_pct = max(0.0, min(100.0, (total_pnl / 50.0) * 100))
-
+        sig   = {"BUY": "[BUY]", "SELL": "[SELL]"}.get(result.signal, "[HOLD]")
+        pline = (f"LONG {pos['qty']:.6f} @ ${pos['entry_price']:,.4f}  "
+                 f"Unreal: {'+ ' if unreal>=0 else ''}${unreal:,.2f}"
+                 if pos else "FLAT")
+        total = self.memory.get_total_realized_pnl()
+        tsign = "+" if total >= 0 else ""
         send_telegram(
-            f"{self.emoji} <b>CYCLE #{cycle} — {self.symbol}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💵 <b>Price:</b> <b>${price:,.4f}</b> | {sig_icon} <b>{result.signal}</b>\n"
-            f"🧠 <b>AI Forecast:</b> {round(win_prob*100)}% Win Prob | Risk: {risk_mult:.2f}x\n"
-            f"📊 <i>{html.escape(result.reason)}</i>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{pos_line}\n"
-            f"🎯 <b>$50 Goal Progress:</b> {'+' if total_pnl >= 0 else ''}${total_pnl:,.4f} / +$50.00 ({progress_pct:.1f}%)\n"
-            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            f"[{self.emoji}] <b>Cycle #{cycle} - {self.symbol}</b>\n"
+            f"Price: <b>${price:,.4f}</b>  {sig}\n"
+            f"AI: {round(win_prob*100)}% Win Prob  Risk: {risk_mult:.2f}x\n"
+            f"<i>{html.escape(result.reason)}</i>\n"
+            f"Pos: {pline}\n"
+            f"Total PnL: {tsign}${total:,.4f}\n"
+            f"<i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  ENTRY POINT
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# ENTRY POINT
+# ---------------------------------------------------------------------------
 _active_bot_threads: dict[str, threading.Thread] = {}
 _bot_start_lock = threading.Lock()
 
 
-def start_all_bots(symbol: Optional[str] = None):
+def start_all_bots(symbol: Optional[str] = None) -> list:
     global API_KEY, API_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED
-
-    # Reload latest environment variables
     load_dotenv()
-    API_KEY = os.getenv("ALPACA_API_KEY", "") or API_KEY
-    API_SECRET = os.getenv("ALPACA_SECRET_KEY", "") or API_SECRET
+    API_KEY            = os.getenv("ALPACA_API_KEY",    "") or API_KEY
+    API_SECRET         = os.getenv("ALPACA_SECRET_KEY", "") or API_SECRET
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "") or TELEGRAM_BOT_TOKEN
-    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "") or TELEGRAM_CHAT_ID
-    TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
+    TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID",   "") or TELEGRAM_CHAT_ID
+    TELEGRAM_ENABLED   = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
 
     if not API_KEY or not API_SECRET:
-        print("⚠️ Missing Alpaca API credentials in environment. Bot waiting for keys...")
+        print("WARNING: Missing Alpaca API credentials.")
         return []
 
     with _bot_start_lock:
-        targets = [symbol] if symbol else list(ASSET_CONFIG.keys())
-        started_new = []
+        targets     = [symbol] if symbol else list(ASSET_CONFIG.keys())
+        started_new: list = []
 
         for sym in targets:
             if sym not in ASSET_CONFIG:
-                print(f"❌ Unknown symbol: {sym}. Available: {list(ASSET_CONFIG.keys())}")
+                print(f"Unknown symbol: {sym}")
                 continue
-
             existing = _active_bot_threads.get(sym)
             if existing and existing.is_alive():
-                continue  # Bot thread already active and healthy
-
+                continue
             cfg = ASSET_CONFIG[sym]
             try:
                 bot = AssetBot(sym, cfg)
-                t = threading.Thread(target=bot.run, name=f"Bot-{sym}", daemon=True)
+                t   = threading.Thread(target=bot.run, name=f"Bot-{sym}", daemon=True)
                 t.start()
                 _active_bot_threads[sym] = t
                 started_new.append(sym)
-                print(f"✅ Started persistent thread for {sym} ({cfg['strategy'].NAME})")
+                print(f"  Started {sym} ({cfg['strategy'].NAME})")
                 time.sleep(1.5)
             except Exception as e:
-                print(f"❌ Error starting bot for {sym}: {e}")
+                print(f"  Error starting {sym}: {e}")
 
-        active_threads = [t for t in _active_bot_threads.values() if t.is_alive()]
+        active = [t for t in _active_bot_threads.values() if t.is_alive()]
         if started_new:
-            print(f"\n🚀 {len(active_threads)} asset bots actively scanning with SQLite Memory & AI Learner.\n")
-            # Send Telegram launch announcement
-            asset_summary = ", ".join([f"{ASSET_CONFIG[s]['emoji']} {s.split('/')[0]}" for s in _active_bot_threads if _active_bot_threads[s].is_alive()])
+            print(f"\n{len(active)} bots running.\n")
+            names = ", ".join(f"[{ASSET_CONFIG[s]['emoji']}]{s.split('/')[0]}"
+                              for s in _active_bot_threads if _active_bot_threads[s].is_alive())
             send_telegram(
-                f"🚀 <b>EveryCryptoBot Live on Render</b>\n\n"
-                f"⚡ <b>Engine:</b> Autonomous Multi-Asset Trading System\n"
-                f"📊 <b>Active Bots ({len(active_threads)}):</b> {asset_summary}\n"
-                f"🎯 <b>Target:</b> +$50.00 Profit ($100 Paper Starting Capital)\n"
-                f"🧠 <b>AI Learner:</b> Walk-Forward Classifier Active\n"
-                f"🌐 <b>Dashboard:</b> https://everycryptobot.onrender.com\n\n"
-                f"Market scanning loops initialized. Signals and executions will broadcast in real-time."
+                f"<b>[LAUNCH] EveryCryptoBot v3  ({len(active)} Bots)</b>\n\n"
+                f"Assets: {names}\n"
+                f"AI: Walk-Forward Ensemble Active\n"
+                f"Max Concurrent Positions: {MAX_CONCURRENT_POSITIONS}\n"
+                f"Dashboard: https://everycryptobot.onrender.com"
             )
-
-        return active_threads
-
+        return active
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=None,
-                        help="Run single asset (e.g. SOL/USD). Omit to run all.")
+                        help="Run a single asset (e.g. SOL/USD). Omit to run all 11.")
     args = parser.parse_args()
-
     start_all_bots(symbol=args.symbol)
-
     try:
         while True:
             time.sleep(30)
     except KeyboardInterrupt:
-        print("\n🛑 Shutting down bots...")
+        print("\nShutting down...")
 
 
 if __name__ == "__main__":

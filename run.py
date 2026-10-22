@@ -30,23 +30,18 @@ def start_dashboard(auto_open: bool):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-browser", action="store_true", help="Don't auto-open the browser")
-    parser.add_argument("--one-bot", action="store_true", help="Run ONE bot (BTC/USD 1m Turbo Scalper with $50 goal)")
-    parser.add_argument("--symbol", default=None, help="Only run one asset bot (e.g. SOL/USD)")
+    parser.add_argument("--symbol", default=None, help="Only run one asset bot (e.g. BTC/USD, SOL/USD). Omit for all 11.")
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  EveryCryptoBot — Autonomous Paper Trading System")
+    print("  EveryCryptoBot v3.0 — Autonomous Paper Trading Engine")
     print("=" * 60)
-    if args.one_bot:
-        print("  ⚡  Mode        : ONE BOT (BTC/USD 1m Turbo Scalper)")
-        print("  🎯  Goal        : +$50.00 Profit in 2 Hours ($100 Starting Wallet)")
-        print("  💰  Stake       : 90% Capital Allocation (~$90.00 per trade)")
-    else:
-        print("  📊  BTC bot     : alpaca_btc_bot.py")
-        print("  🚀  Alt bots    : ETH / SOL / DOGE / LINK / AAVE / AVAX")
+    print("  🚀  Monitored   : 11 Crypto Assets (BTC, ETH, SOL, DOGE, LINK, AAVE, AVAX, LTC, XRP, UNI, MATIC)")
+    print("  🧠  AI Engine   : Walk-Forward ML + Mistake Memory Active")
+    print("  🛡️  Risk Mgt    : Dynamic Fractional Sizing + Trailing ATR Stops")
     port = os.getenv("PORT", "8765")
     print(f"  🌐  Dashboard   : http://0.0.0.0:{port}")
-    print("  📱  Telegram    : @UnboundCycle12Bot")
+    print("  📱  Telegram    : Real-Time Trade Fills & Cycle Telemetry")
     print("=" * 60 + "\n")
 
     # Start dashboard server in background thread

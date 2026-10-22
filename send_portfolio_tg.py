@@ -35,23 +35,22 @@ buying_power = float(acc.get("buying_power", 100))
 pos_count = len(pos)
 
 msg = (
-    "🚀 <b>EVERYCRYPTOBOT — FRESH INITIALIZATION</b> 🚀\n"
+    "🚀 <b>EVERYCRYPTOBOT v3.0 — AUTONOMOUS PORTFOLIO</b> 🚀\n"
     "━━━━━━━━━━━━━━━━━━━━━\n"
     "🏦 <b>Broker:</b> Alpaca Paper Trading v2\n"
     "💼 <b>Current Portfolio Status:</b>\n"
     f"  • <b>Cash Balance:</b> ${cash:,.2f}\n"
     f"  • <b>Total Equity:</b> ${equity:,.2f}\n"
     f"  • <b>Buying Power:</b> ${buying_power:,.2f}\n"
-    f"  • <b>Open Positions:</b> {pos_count} (FLAT)\n"
-    f"  • <b>Total Realized Profits:</b> $0.0000 (Fresh Session)\n"
+    f"  • <b>Open Positions:</b> {pos_count}\n"
     "━━━━━━━━━━━━━━━━━━━━━\n"
-    "🎯 <b>SESSION TARGET:</b>\n"
-    "  • <b>Profit Goal:</b> <b>+$50.00 in 2 Hours</b>\n"
-    "  • <b>Target Account Value:</b> <b>$150.00</b>\n"
-    "  • <b>Execution Mode:</b> ⚡ 1-Minute Turbo Scalper\n"
-    "  • <b>Allocation:</b> 90% Dynamic Capital Deployment\n"
+    "⚙️ <b>ENGINE CONFIGURATION:</b>\n"
+    "  • <b>Monitored Assets:</b> 11 Pairs (BTC, ETH, SOL, DOGE, LINK, AAVE, AVAX, LTC, XRP, UNI, MATIC)\n"
+    "  • <b>Mode:</b> Autonomous Unconstrained Trading (No Artificial Goal)\n"
+    "  • <b>AI Engine:</b> Walk-Forward Ensemble + Mistake Memory\n"
+    "  • <b>Risk Mgt:</b> Dynamic Fractional Compounding + Trailing ATR Stops\n"
     "━━━━━━━━━━━━━━━━━━━━━\n"
-    "🌐 <b>Live Dashboard:</b> http://localhost:8765\n"
+    "🌐 <b>Live Dashboard:</b> https://everycryptobot.onrender.com\n"
     f"🕒 <i>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
 )
 

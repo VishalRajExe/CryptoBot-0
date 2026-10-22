@@ -93,7 +93,7 @@ def get_logs_for_symbol(symbol: str, max_lines: int = 100) -> dict:
             for l in _tail_file(btc_file, max_lines // 2):
                 all_lines.append(f"[BTC] {l}")
         # Altcoin logs
-        for s in ["ETHUSD", "SOLUSD", "DOGEUSD", "LINKUSD", "AAVEUSD", "AVAXUSD"]:
+        for s in ["ETHUSD", "SOLUSD", "DOGEUSD", "LINKUSD", "AAVEUSD", "AVAXUSD", "LTCUSD", "XRPUSD", "UNIUSD", "MATICUSD"]:
             s_file = _get_latest_file(os.path.join(LOGS_DIR, f"{s}_*.log"))
             if s_file:
                 for l in _tail_file(s_file, max_lines // 5):
@@ -108,7 +108,7 @@ def get_logs_for_symbol(symbol: str, max_lines: int = 100) -> dict:
             "count": len(all_lines[-max_lines:]),
         }
 
-    # Specific altcoin (e.g. ETH, SOL, DOGE, LINK, AVAX)
+    # Specific altcoin (e.g. ETH, SOL, DOGE, LINK, AVAX, LTC, XRP, UNI, MATIC)
     safe = sym.replace("USD", "") + "USD"
     latest = _get_latest_file(os.path.join(LOGS_DIR, f"{safe}_*.log"))
     lines = _tail_file(latest, max_lines)
@@ -136,9 +136,14 @@ def get_backtest_summaries() -> list:
 
 
 def ensure_bots_running():
+    try:
+        from multi_bot import ASSET_CONFIG
+        expected_count = len(ASSET_CONFIG)
+    except Exception:
+        expected_count = 11
 
     active_bot_count = len([t for t in threading.enumerate() if t.name.startswith("Bot-") and t.is_alive()])
-    if active_bot_count < 7:
+    if active_bot_count < expected_count:
         try:
             from multi_bot import start_all_bots
             t = threading.Thread(target=start_all_bots, daemon=True, name="BotSupervisor")
@@ -261,7 +266,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 active_map = {p["symbol"]: p for p in active_list}
 
                 result = {}
-                for sym in ["ETH/USD", "SOL/USD", "DOGE/USD", "LINK/USD", "AAVE/USD", "AVAX/USD"]:
+                try:
+                    from multi_bot import ASSET_CONFIG
+                    all_syms = list(ASSET_CONFIG.keys())
+                except Exception:
+                    all_syms = ["BTC/USD", "ETH/USD", "SOL/USD", "DOGE/USD", "LINK/USD", "AAVE/USD", "AVAX/USD", "LTC/USD", "XRP/USD", "UNI/USD", "MATIC/USD"]
+
+                for sym in all_syms:
                     sym_trades = [t for t in recent_trades if t.get("symbol") == sym]
                     result[sym] = {
                         "position": active_map.get(sym),
