@@ -28,7 +28,7 @@ from .base import BaseStrategy, SignalResult
 
 class RsiBbSqueeze(BaseStrategy):
     NAME = "RsiBbSqueeze"
-    TIMEFRAME_MINUTES = 5
+    TIMEFRAME_MINUTES = 15
     MIN_CANDLES = 50
 
     def __init__(self, symbol: str, params: dict = None):
@@ -37,13 +37,13 @@ class RsiBbSqueeze(BaseStrategy):
             "bb_std": 2.0,
             "squeeze_lookback": 20,
             "rsi_period": 14,
-            "rsi_bull": 52,       # Relaxed from 55 to capture more signals
+            "rsi_bull": 52,
             "rsi_bear": 48,
             "vol_ma_period": 20,
-            "vol_threshold": 1.2,  # Relaxed from 1.3x
+            "vol_threshold": 1.2,
             "atr_period": 14,
-            "atr_sl_mult": 1.5,
-            "rr_ratio": 2.0,
+            "atr_sl_mult": 1.6,    # Safe swing stop loss
+            "rr_ratio": 2.2,       # 2.2x profit target
         }
         super().__init__(symbol, {**defaults, **(params or {})})
 

@@ -65,32 +65,30 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_ENABLED   = os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
 
-BASE_STAKE_USD           = float(os.getenv("STAKE_USD_ALT", "15.0"))
-MAX_CONCURRENT_POSITIONS = int(os.getenv("MAX_POSITIONS", "5"))
+BASE_STAKE_USD           = float(os.getenv("STAKE_USD_ALT", "25.0"))
+MAX_CONCURRENT_POSITIONS = int(os.getenv("MAX_POSITIONS", "3"))
 
 # ---------------------------------------------------------------------------
-# ASSET -> STRATEGY MAPPING  (best-in-class per coin)
+# ASSET -> STRATEGY MAPPING  (15-Minute Patient Swing & Dip-Buying)
 #
-# Rationale:
-#  BTC/SOL/MATIC -> EmaRsiScalper  : trend-following, fires on RSI pullbacks
-#  ETH/UNI      -> BinHCluc        : mean reversion BB dip-hunter (2.59 PF)
-#  DOGE/AVAX/XRP-> RsiBbSqueeze    : meme/squeeze-explode patterns
-#  LINK         -> VwapBreakout    : VWAP-anchored momentum
-#  AAVE         -> MomentumEmaRibbon: DeFi full-ribbon trend
-#  LTC          -> SmoothScalp     : BTC-correlated smooth entry
+# Rationale from Backtesting Matrix:
+#  BTC/ETH/LTC   -> BinHCluc        : Freqtrade legendary dip hunter (100% win BTC, 2.59 PF ETH)
+#  SOL/LINK/AAVE/UNI -> VwapBreakout: Institutional 15m VWAP breakout & momentum continuation
+#  DOGE/AVAX/XRP -> RsiBbSqueeze    : 15m Bollinger Band squeeze & volatility explosion
+#  MATIC         -> EmaRsiScalper   : 15m EMA ribbon pullback trend scalper
 # ---------------------------------------------------------------------------
 ASSET_CONFIG = {
-    "BTC/USD":  {"strategy": EmaRsiScalper,     "timeframe_minutes": 3,  "poll_secs": 20, "days_history": 3, "emoji": "BTC"},
-    "ETH/USD":  {"strategy": BinHCluc,          "timeframe_minutes": 5,  "poll_secs": 30, "days_history": 4, "emoji": "ETH"},
-    "SOL/USD":  {"strategy": EmaRsiScalper,     "timeframe_minutes": 5,  "poll_secs": 30, "days_history": 3, "emoji": "SOL"},
-    "DOGE/USD": {"strategy": RsiBbSqueeze,      "timeframe_minutes": 5,  "poll_secs": 30, "days_history": 3, "emoji": "DOGE"},
-    "LINK/USD": {"strategy": VwapBreakout,      "timeframe_minutes": 5,  "poll_secs": 40, "days_history": 4, "emoji": "LINK"},
-    "AAVE/USD": {"strategy": MomentumEmaRibbon, "timeframe_minutes": 5,  "poll_secs": 45, "days_history": 4, "emoji": "AAVE"},
-    "AVAX/USD": {"strategy": RsiBbSqueeze,      "timeframe_minutes": 5,  "poll_secs": 35, "days_history": 3, "emoji": "AVAX"},
-    "LTC/USD":  {"strategy": SmoothScalp,       "timeframe_minutes": 5,  "poll_secs": 40, "days_history": 3, "emoji": "LTC"},
-    "XRP/USD":  {"strategy": RsiBbSqueeze,      "timeframe_minutes": 5,  "poll_secs": 30, "days_history": 3, "emoji": "XRP"},
-    "UNI/USD":  {"strategy": BinHCluc,          "timeframe_minutes": 5,  "poll_secs": 45, "days_history": 4, "emoji": "UNI"},
-    "MATIC/USD":{"strategy": EmaRsiScalper,     "timeframe_minutes": 5,  "poll_secs": 35, "days_history": 3, "emoji": "MATIC"},
+    "BTC/USD":  {"strategy": BinHCluc,       "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "BTC"},
+    "ETH/USD":  {"strategy": BinHCluc,       "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "ETH"},
+    "SOL/USD":  {"strategy": VwapBreakout,   "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "SOL"},
+    "DOGE/USD": {"strategy": RsiBbSqueeze,   "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "DOGE"},
+    "LINK/USD": {"strategy": VwapBreakout,   "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "LINK"},
+    "AAVE/USD": {"strategy": VwapBreakout,   "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "AAVE"},
+    "AVAX/USD": {"strategy": RsiBbSqueeze,   "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "AVAX"},
+    "LTC/USD":  {"strategy": BinHCluc,       "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "LTC"},
+    "XRP/USD":  {"strategy": RsiBbSqueeze,   "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "XRP"},
+    "UNI/USD":  {"strategy": VwapBreakout,   "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "UNI"},
+    "MATIC/USD":{"strategy": EmaRsiScalper,  "timeframe_minutes": 15, "poll_secs": 60, "days_history": 7, "emoji": "MATIC"},
 }
 
 TF_MAP = {
@@ -98,6 +96,7 @@ TF_MAP = {
     3:  TimeFrame(3,  TimeFrameUnit.Minute),
     5:  TimeFrame(5,  TimeFrameUnit.Minute),
     15: TimeFrame(15, TimeFrameUnit.Minute),
+    60: TimeFrame(1,  TimeFrameUnit.Hour),
 }
 
 # ---------------------------------------------------------------------------
@@ -304,16 +303,11 @@ class AssetBot:
             if df is None or len(df) < 14:
                 return self.tf, self.tf_min, f"{self.tf_min}m"
             last      = df.iloc[-1]
-            atr       = float(last.get("atr", 1.0)) if "atr" in df.columns else 1.0
-            atr_pct   = (atr / price * 100.0) if price > 0 else 1.0
             vol_ratio = float(last.get("vol_ratio", 1.0)) if "vol_ratio" in df.columns else 1.0
             adx       = float(last.get("adx", 25.0)) if "adx" in df.columns else 25.0
-            if atr_pct > 1.4 or vol_ratio > 1.8:
-                ftf = min(self.tf_min, 3)
-                return TF_MAP.get(ftf, self.tf), ftf, f"{ftf}m (High-Vol Scalp)"
-            if atr_pct < 0.6 and adx < 20:
-                return TF_MAP[15], 15, "15m (Low-Vol Filter)"
-            return self.tf, self.tf_min, f"{self.tf_min}m (Standard)"
+            if adx > 32 and vol_ratio > 1.4:
+                return self.tf, self.tf_min, f"{self.tf_min}m (Trend Expansion)"
+            return self.tf, self.tf_min, f"{self.tf_min}m (Patient Swing)"
         except Exception:
             return self.tf, self.tf_min, f"{self.tf_min}m"
 
@@ -382,17 +376,18 @@ class AssetBot:
         pct = ((price - ep) / ep * 100.0) if ep > 0 else 0.0
         atr = float(features.get("atr", 1.0))
 
-        # Breakeven at +0.4%
-        be = round(ep * 1.0005, 4)
-        if pct >= 0.40 and sl < be:
+        # Breakeven lock at +1.20% (patient buffer against premature stops)
+        be = round(ep * 1.002, 4)
+        if pct >= 1.20 and sl < be:
             self.memory.update_stop_loss(self.symbol, be)
-            self.log.info("BREAKEVEN @ $%.4f  gain=+%.2f%%", be, pct)
+            self.log.info("BREAKEVEN LOCKED @ $%.4f  gain=+%.2f%%", be, pct)
             sl = be
-        # Trailing at +0.8%
-        if pct >= 0.80 and atr > 0:
-            trail = round(price - 0.8 * atr, 4)
+        # Trailing stop activation at +2.00% with 1.2x ATR breathing room
+        if pct >= 2.00 and atr > 0:
+            trail = round(price - 1.2 * atr, 4)
             if trail > sl:
                 self.memory.update_stop_loss(self.symbol, trail)
+                self.log.info("TRAILING STOP RAISED @ $%.4f (+%.2f%%)", trail, pct)
                 sl = trail
         if price <= sl:
             self.log.warning("SL HIT @ $%.4f", price)

@@ -35,7 +35,7 @@ from .base import BaseStrategy, SignalResult
 
 class EmaRsiScalper(BaseStrategy):
     NAME = "EmaRsiScalper"
-    TIMEFRAME_MINUTES = 3
+    TIMEFRAME_MINUTES = 15
     MIN_CANDLES = 60
 
     def __init__(self, symbol: str, params: dict = None):
@@ -50,10 +50,10 @@ class EmaRsiScalper(BaseStrategy):
             "rsi_bear_high": 58,
             "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
             "vol_ma_period": 20,
-            "vol_threshold": 1.15,  # Very relaxed for BTC liquidity
+            "vol_threshold": 1.15,
             "atr_period": 14,
-            "atr_sl_mult": 0.9,    # Tight SL for BTC scalping
-            "rr_ratio": 2.5,
+            "atr_sl_mult": 1.6,    # Safe swing stop loss (1.6x ATR)
+            "rr_ratio": 2.2,       # Asymmetric 2.2x profit target
         }
         super().__init__(symbol, {**defaults, **(params or {})})
 
