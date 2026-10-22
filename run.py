@@ -55,7 +55,7 @@ def main():
     time.sleep(1)
 
     # Start bot engines in the same process (saves ~250MB RAM on Render 512MB free tier)
-    target_sym = "BTC/USD" if args.one_bot else args.symbol
+    target_sym = getattr(args, "symbol", None)
     try:
         from multi_bot import start_all_bots
         start_all_bots(symbol=target_sym)
