@@ -11,10 +11,14 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-token = os.environ.get("TELEGRAM_BOT_TOKEN")
-chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-key = os.environ.get("ALPACA_API_KEY")
-sec = os.environ.get("ALPACA_SECRET_KEY")
+token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+key = os.environ.get("ALPACA_API_KEY", "")
+sec = os.environ.get("ALPACA_SECRET_KEY", "")
+
+if not key or not sec:
+    print("Error: ALPACA_API_KEY or ALPACA_SECRET_KEY is not set.")
+    exit(1)
 
 headers = {
     "APCA-API-KEY-ID": key,

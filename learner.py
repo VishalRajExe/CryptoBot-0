@@ -344,15 +344,14 @@ class TradeLearner:
             penalty, mistake_reason = self._calculate_mistake_penalty(vec)
             final_prob = max(0.15, min(0.95, blended_prob - penalty))
 
-            # Decision thresholds (Calibrated for High-Velocity Paper Scalping & Goal Pursuit)
-            if final_prob < 0.15:
-                reason = (f"🛑 AI VETO: Extremely low expected win probability ({round(final_prob * 100)}%). "
-                          f"Severe unfavorable regime. {mistake_reason}".strip())
+            # Decision thresholds (Calibrated for Patient Swing Trading & High-Win-Rate Preservation)
+            if final_prob < 0.42:
+                reason = (f"🛑 AI VETO: Low expected win probability ({round(final_prob * 100)}%). "
+                          f"Unfavorable regime. {mistake_reason}".strip())
                 return False, round(final_prob, 3), reason
 
-            if penalty > 0.05 or final_prob < 0.35:
-                reason = (f"⚡ AI ACTIVE SCALP: {round(final_prob * 100)}% Win Prob "
-                          f"(Dynamic stake adjustment active). {mistake_reason}".strip())
+            if penalty > 0.05 or final_prob < 0.52:
+                reason = (f"⚡ AI APPROVED (Moderate Conviction): {round(final_prob * 100)}% Win Prob. {mistake_reason}".strip())
                 return True, round(final_prob, 3), reason
 
             if final_prob > 0.65:
