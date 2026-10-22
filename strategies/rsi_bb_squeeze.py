@@ -113,37 +113,37 @@ class RsiBbSqueeze(BaseStrategy):
 
         # Previous candle was in or just exiting a squeeze
         was_squeezing = bool(prev.get("bb_squeeze", False))
-        vol_ok = vol_ratio >= p["vol_threshold"]
+        # Volume confirmation (fallback to True if feed volume is 0 or NaN)
+        vol_ok = (vol_ratio >= 1.0) or (vol_ratio == 0.0) or pd.isna(vol_ratio)
 
-        # ── BUY: Price breaks above upper BB during/after squeeze ────────────
-        # Also allow: price > BB_mid + upward expanding, RSI bullish, trend up
-        upper_break = current_price > bb_upper and (was_squeezing or expanding)
-        trend_up = ema21 > ema55  # Basic trend alignment
+        # ── BUY 1: Lower BB Oversold Dip Buy (Mean-Reversion) ───────────────
+        lower_dip = (current_price <= (bb_lower * 1.002)) and (rsi < 35.0)
+        if lower_dip:
+            sl = round(current_price - risk, 4)
+            tp = round(max(bb_mid, current_price + risk * p["rr_ratio"]), 4)
+            return SignalResult("BUY", sl, tp, 0.85,
+                                f"BB Lower Dip Hunter 🟢 Price<=${bb_lower:.4f} RSI={rsi:.1f} TP=${tp:.4f}")
+
+        # ── BUY 2: Price breaks above upper BB during/after squeeze ──────────
+        upper_break = current_price >= (0.998 * bb_upper) and (was_squeezing or expanding)
+        trend_up = ema21 > ema55
         rsi_bull = rsi > p["rsi_bull"]
-
-        # Relaxed buy: price near upper BB with bullish RSI (no strict squeeze needed)
-        near_upper = current_price > (bb_mid + 0.4 * (bb_upper - bb_mid)) and rsi > 58 and trend_up
+        near_upper = current_price > (bb_mid + 0.4 * (bb_upper - bb_mid)) and rsi > 55 and trend_up
 
         if (upper_break or near_upper) and rsi_bull and vol_ok:
-            conf = min(1.0, 0.6 + (rsi - 50) / 100 + (vol_ratio - 1.0) * 0.1)
+            conf = min(1.0, 0.6 + (rsi - 50) / 100)
             sl = round(current_price - risk, 4)
             tp = round(current_price + risk * p["rr_ratio"], 4)
             mode = "BB Squeeze Break↑" if upper_break else "BB Upper Momentum↑"
             return SignalResult("BUY", sl, tp, conf,
-                                f"{mode} RSI={rsi:.1f} Vol={vol_ratio:.1f}x ATR={atr:.4f}")
+                                f"{mode} 🟢 RSI={rsi:.1f} Vol={vol_ratio:.1f}x TP=${tp:.4f}")
 
-        # ── SELL / EXIT: Price breaks below lower BB ─────────────────────────
-        lower_break = current_price < bb_lower and (was_squeezing or expanding)
-        rsi_bear = rsi < p["rsi_bear"]
-
-        near_lower = current_price < (bb_mid - 0.4 * (bb_mid - bb_lower)) and rsi < 42
-
-        if (lower_break or near_lower) and rsi_bear and vol_ok:
+        # ── EXIT / SELL: Overbought extension above upper BB ────────────────
+        if current_price >= bb_upper and rsi > 68.0:
             sl = round(current_price + risk, 4)
             tp = round(current_price - risk * p["rr_ratio"], 4)
-            mode = "BB Squeeze Break↓" if lower_break else "BB Lower Momentum↓"
-            return SignalResult("SELL", sl, tp, 0.65,
-                                f"{mode} RSI={rsi:.1f} Vol={vol_ratio:.1f}x")
+            return SignalResult("SELL", sl, tp, 0.80,
+                                f"BB Upper Overbought 🔴 RSI={rsi:.1f}")
 
         return SignalResult("HOLD", 0, 0, 0.0,
-                            f"BB_W={last['bb_width']:.4f} RSI={rsi:.1f} Vol={vol_ratio:.1f}x Squeeze={'Y' if last.get('bb_squeeze') else 'N'}")
+                            f"BB_Low=${bb_lower:.4f} Price=${current_price:.4f} RSI={rsi:.1f} Squeeze={'Y' if last.get('bb_squeeze') else 'N'}")

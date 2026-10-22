@@ -135,16 +135,23 @@ class EmaRsiScalper(BaseStrategy):
 
         macd_rising  = bool(last["macd_rising"])
         macd_positive = bool(last["macd_positive"])
-        vol_ok = vol_ratio >= p["vol_threshold"]
+        vol_ok = (vol_ratio >= 1.0) or (vol_ratio == 0.0) or pd.isna(vol_ratio)
 
-        # ── BUY: EMA bull stack + RSI in pullback zone + MACD momentum up ────
+        # ── BUY 1: Oversold Dip Reversal under EMA Ribbon ────────────────────
+        if rsi < 35.0 and current_price < ema55:
+            sl   = round(current_price - risk, 4)
+            tp   = round(max(ema21, current_price + risk * p["rr_ratio"]), 4)
+            return SignalResult("BUY", sl, tp, 0.84,
+                                f"EMA Oversold Dip Hunter 🟢 RSI={rsi:.1f} EMA21=${ema21:.4f} TP=${tp:.4f}")
+
+        # ── BUY 2: EMA bull stack + RSI in pullback zone + MACD momentum up ──
         rsi_pullback = p["rsi_bull_low"] <= rsi <= p["rsi_bull_high"]
         if bull_stack and rsi_pullback and macd_rising and vol_ok:
             sl   = round(current_price - risk, 4)
             tp   = round(current_price + risk * p["rr_ratio"], 4)
             conf = min(1.0, 0.55 + (adx / 100) + (rsi - 42) / 100)
             return SignalResult("BUY", sl, tp, conf,
-                                f"EMA8>{ema21:.0f}>{ema55:.0f}✅ RSI={rsi:.1f} MACD↑ Vol={vol_ratio:.1f}x ADX={adx:.1f}")
+                                f"EMA Stack Trend Pullback 🟢 RSI={rsi:.1f} MACD↑ TP=${tp:.4f}")
 
         # ── SELL: EMA bear stack + RSI in pullback zone ───────────────────────
         rsi_rally = p["rsi_bear_low"] <= rsi <= p["rsi_bear_high"]

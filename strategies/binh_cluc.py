@@ -97,24 +97,25 @@ class BinHCluc(BaseStrategy):
         # Condition 1: BinHV45 Volatility Expansion Dip
         cond_binh = (
             bb40_lower > 0 and
-            bb40_delta > (price * 0.004) and
-            closedelta > (price * 0.006) and
-            tail < (bb40_delta * 0.50) and
-            price < bb40_lower and
-            price <= float(prev["close"]) and
-            rsi < 40.0
+            price <= (1.002 * bb40_lower) and
+            rsi < 38.0
         )
 
         # Condition 2: Cluc Mean Reversion Oversold Stretch
         cond_cluc = (
             price < ema50 and
-            price < (0.996 * bb20_lower) and
-            vol < (vol_sma30 * 12.0) and
-            rsi < 38.0
+            price <= (1.002 * bb20_lower) and
+            rsi < 35.0
+        )
+
+        # Condition 3: Extreme RSI Flush
+        cond_flush = (
+            rsi < 26.0 and
+            price < ema50
         )
 
         # Sell / Exit Condition: Mean reverted back above BB Mid-Band
-        if price > bb20_mid and rsi > 55.0:
+        if price >= bb20_mid and rsi > 52.0:
             return SignalResult(
                 signal="SELL",
                 stop_loss=0.0,
@@ -124,16 +125,16 @@ class BinHCluc(BaseStrategy):
             )
 
         # Buy Entry Trigger
-        if cond_binh or cond_cluc:
-            mode = "BinHV45" if cond_binh else "ClucMay"
+        if cond_binh or cond_cluc or cond_flush:
+            mode = "BinHV45" if cond_binh else ("ClucMay" if cond_cluc else "DeepFlush")
             sl = round(price - (1.8 * atr), 4)
-            tp = round(max(bb20_mid, price + (2.5 * atr)), 4)
+            tp = round(max(bb20_mid, price + (2.2 * atr)), 4)
             return SignalResult(
                 signal="BUY",
                 stop_loss=sl,
                 take_profit=tp,
                 confidence=0.88,
-                reason=f"{mode} Dip Hunter 🟢 Price<$ {bb20_lower:.4f} RSI={rsi:.1f} TP=$ {tp:.4f}"
+                reason=f"{mode} Dip Hunter 🟢 Price<=${bb20_lower:.4f} RSI={rsi:.1f} TP=${tp:.4f}"
             )
 
         return SignalResult(
@@ -141,5 +142,5 @@ class BinHCluc(BaseStrategy):
             stop_loss=0.0,
             take_profit=0.0,
             confidence=0.0,
-            reason=f"BB20_low=$ {bb20_lower:.4f} Price=$ {price:.4f} RSI={rsi:.1f}"
+            reason=f"BB20_low=${bb20_lower:.4f} Price=${price:.4f} RSI={rsi:.1f}"
         )

@@ -82,25 +82,39 @@ class VwapBreakout(BaseStrategy):
             return SignalResult("HOLD", 0, 0, 0.0, "Not enough bars")
 
         last = df.iloc[-1]
-        atr  = last["atr"]
+        prev = df.iloc[-2]
+        atr  = float(last["atr"]) if pd.notna(last["atr"]) else current_price * 0.015
         risk = atr * p["atr_sl_mult"]
+        vwap = float(last["vwap"]) if pd.notna(last["vwap"]) else current_price
+        rsi  = float(last["rsi"]) if "rsi" in last and pd.notna(last["rsi"]) else 50.0
+        macd_hist = float(last.get("macd_hist", 0.0))
+        prev_hist = float(prev.get("macd_hist", 0.0))
+        macd_rising = macd_hist > prev_hist
 
-        cross_up   = bool(last["vwap_cross_up"])
-        cross_down = bool(last["vwap_cross_down"])
-        vol_surge  = bool(last["vol_surge"])
+        cross_up   = bool(last.get("vwap_cross_up", False))
+        above_vwap = current_price >= (0.998 * vwap)
 
-        if cross_up and vol_surge and last["macd_positive"]:
-            sl   = round(current_price - risk, 4)
-            tp   = round(current_price + risk * p["rr_ratio"], 4)
-            vwap = last["vwap"]
-            return SignalResult("BUY", sl, tp, 0.75,
-                                f"VWAP↑✅ Vol surge✅ MACD+✅ VWAP=${vwap:.2f}")
+        # ── BUY 1: Oversold Dip Reversal under VWAP ──────────────────────────
+        if rsi < 35.0 and current_price < vwap:
+            sl = round(current_price - risk, 4)
+            tp = round(max(vwap, current_price + risk * p["rr_ratio"]), 4)
+            return SignalResult("BUY", sl, tp, 0.82,
+                                f"VWAP Oversold Dip 🟢 RSI={rsi:.1f} VWAP=${vwap:.2f} TP=${tp:.4f}")
 
-        if cross_down and vol_surge and last["macd_negative"]:
+        # ── BUY 2: Bullish VWAP Breakout or Continuation ─────────────────────
+        if (cross_up or (above_vwap and macd_rising)) and (42.0 <= rsi <= 68.0):
+            sl = round(current_price - risk, 4)
+            tp = round(current_price + risk * p["rr_ratio"], 4)
+            mode = "VWAP Cross↑" if cross_up else "VWAP Momentum↑"
+            return SignalResult("BUY", sl, tp, 0.78,
+                                f"{mode} 🟢 RSI={rsi:.1f} VWAP=${vwap:.2f} TP=${tp:.4f}")
+
+        # ── SELL / EXIT: Severe breakdown or overbought ───────────────────────
+        if rsi > 70.0 and current_price > (1.02 * vwap):
             sl = round(current_price + risk, 4)
             tp = round(current_price - risk * p["rr_ratio"], 4)
-            return SignalResult("SELL", sl, tp, 0.65,
-                                f"VWAP↓✅ Vol surge✅ MACD-✅ VWAP=${last['vwap']:.2f}")
+            return SignalResult("SELL", sl, tp, 0.75,
+                                f"VWAP Overbought Extension 🔴 RSI={rsi:.1f}")
 
         return SignalResult("HOLD", 0, 0, 0.0,
-                            f"VWAP=${last['vwap']:.2f} Price=${current_price:.2f} Vol_ratio={last['volume']/max(last['vol_ma'],1):.1f}x")
+                            f"VWAP=${vwap:.2f} Price=${current_price:.2f} RSI={rsi:.1f}")

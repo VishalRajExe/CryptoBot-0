@@ -427,12 +427,15 @@ class AssetBot:
                     if col in df.columns and pd.notna(last[col]):
                         indicators[col] = round(float(last[col]), 4)
 
+                raw_vr = float(indicators.get("vol_ratio", 1.0) or 1.0)
+                safe_vr = raw_vr if raw_vr > 0.0 else 1.0
+
                 features = {
                     "rsi":       indicators.get("rsi",       50.0),
                     "macd_hist": indicators.get("macd_hist",  0.0),
                     "atr":       indicators.get("atr",        1.0),
                     "price":     price,
-                    "vol_ratio": indicators.get("vol_ratio",  1.0),
+                    "vol_ratio": safe_vr,
                     "adx":       indicators.get("adx",       25.0),
                     "ema200":    indicators.get("ema200",    price),
                 }
@@ -485,14 +488,14 @@ class AssetBot:
                 self.log.error("Cycle %d error on %s: %s", cycle, self.symbol, e, exc_info=True)
                 time.sleep(self.poll)
 
-    # -- Telegram notifications (no goal/target references) -------------------
+    # -- Telegram notifications (Clear visual emojis & smart radar filtering) -
     def _notify_startup(self) -> None:
         send_telegram(
-            f"[{self.emoji}] <b>BOT STARTED: {self.symbol}</b>\n"
-            f"Strategy: <b>{html.escape(self.strategy.NAME)}</b>\n"
-            f"Timeframe: {self.tf_min}m  Poll: {self.poll}s\n"
-            f"Max Concurrent Slots: {MAX_CONCURRENT_POSITIONS}\n"
-            f"<i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            f"🚀 <b>BOT INITIALIZED: {self.symbol}</b> [{self.emoji}]\n"
+            f"🎯 Strategy: <b>{html.escape(self.strategy.NAME)}</b>\n"
+            f"⏱ Timeframe: <b>{self.tf_min}m Patient Swing</b> (Poll: {self.poll}s)\n"
+            f"🛡 Max Slots: {MAX_CONCURRENT_POSITIONS} Concurrent Trades\n"
+            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
     def _notify_buy(self, qty: float, price: float, sl: float, tp: float,
@@ -501,52 +504,86 @@ class AssetBot:
         reward = abs(tp - price)
         rr     = (reward / risk) if risk > 0 else 0.0
         send_telegram(
-            f"<b>[BUY] {self.symbol}</b> [{self.emoji}]\n"
-            f"Strategy: {html.escape(self.strategy.NAME)}\n"
-            f"Qty: <code>{qty:.6f}</code>  Stake: ${stake:,.2f}  Risk: {risk_mult:.2f}x\n"
-            f"Fill: <b>${price:,.4f}</b>  SL: ${sl:,.4f}  TP: ${tp:,.4f}\n"
-            f"R:R {rr:.2f}  (-${risk:,.2f} / +${reward:,.2f})\n"
-            f"<i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            f"🟢 <b>[BUY EXECUTED] {self.symbol}</b> [{self.emoji}]\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 Strategy: <b>{html.escape(self.strategy.NAME)}</b>\n"
+            f"📦 Qty: <code>{qty:.6f}</code> | Stake: <b>${stake:,.2f}</b> (Risk: {risk_mult:.2f}x)\n"
+            f"💵 Entry Fill: <b>${price:,.4f}</b>\n"
+            f"🔴 Stop Loss: <b>${sl:,.4f}</b> (-${risk:,.2f})\n"
+            f"🟢 Take Profit: <b>${tp:,.4f}</b> (+${reward:,.2f})\n"
+            f"⚖️ Risk/Reward Ratio: <b>{rr:.2f}:1</b>\n"
+            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
     def _notify_sell(self, qty: float, price: float, ep: float, pnl: float,
                      pnl_pct: float, reason: str, learning: dict) -> None:
-        labels = {"take_profit": "[TP HIT]", "stop_loss": "[SL HIT]"}
-        hdr    = labels.get(reason, "[SELL]")
+        is_win = pnl >= 0
+        tag    = "🟢 [PROFIT TAKE]" if is_win else "🔴 [STOP LOSS HIT]"
+        if reason == "sell_signal":
+            tag = "🔵 [SIGNAL EXIT]"
         total  = self.memory.get_total_realized_pnl()
-        cool   = "\nCooldown: 20 mins" if learning.get("cooldown_until") else ""
-        label  = "WIN" if pnl >= 0 else "LOSS"
-        sign   = "+" if pnl >= 0 else ""
-        tsign  = "+" if total >= 0 else ""
+        cool   = "\n⏳ Cooldown: 20 mins" if learning.get("cooldown_until") else ""
+        pnl_badge = f"🟢 +${pnl:,.4f}" if is_win else f"🔴 -${abs(pnl):,.4f}"
+        tot_badge = f"🟢 +${total:,.4f}" if total >= 0 else f"🔴 -${abs(total):,.4f}"
+
         send_telegram(
-            f"<b>{hdr} {self.symbol}</b> [{self.emoji}]\n"
-            f"Strategy: {html.escape(self.strategy.NAME)}\n"
-            f"Qty: <code>{qty:.6f}</code>  Entry: ${ep:,.4f}  Exit: ${price:,.4f}\n"
-            f"Trade PnL: <b>{sign}${pnl:,.4f} ({pnl_pct:+.2f}%)</b>  {label}\n"
-            f"Consec Losses: {learning['consecutive_losses']}  Risk Mult: {learning['risk_multiplier']:.2f}x{cool}\n"
-            f"Total PnL: <b>{tsign}${total:,.4f}</b>\n"
-            f"<i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            f"{tag} <b>{self.symbol}</b> [{self.emoji}]\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 Strategy: <b>{html.escape(self.strategy.NAME)}</b>\n"
+            f"📦 Qty: <code>{qty:.6f}</code>\n"
+            f"💵 Entry: ${ep:,.4f} ➔ Exit: ${price:,.4f}\n"
+            f"📊 Trade PnL: <b>{pnl_badge} ({pnl_pct:+.2f}%)</b>\n"
+            f"💼 Total Realized PnL: <b>{tot_badge}</b>{cool}\n"
+            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
     def _notify_cycle(self, cycle: int, price: float, result, pos,
                       unreal: float, win_prob: float, risk_mult: float) -> None:
-        interval = 3 if self.symbol == "BTC/USD" else 6
-        if cycle > 2 and not pos and (cycle % interval != 0):
+        # Check if asset is in hot oversold/overbought radar zone
+        is_hot = False
+        try:
+            r_str = str(result.reason)
+            if "RSI=" in r_str:
+                parts = r_str.split("RSI=")[1].split()
+                rsi_val = float(parts[0])
+                if rsi_val < 35.0 or rsi_val > 68.0:
+                    is_hot = True
+        except Exception:
+            pass
+
+        has_sig = result.signal in ("BUY", "SELL")
+        has_pos = pos is not None
+
+        # Filter out routine HOLD noise unless hot radar or 15-cycle heartbeat
+        if not has_sig and not has_pos and not is_hot and (cycle % 15 != 0):
             return
-        sig   = {"BUY": "[BUY]", "SELL": "[SELL]"}.get(result.signal, "[HOLD]")
-        pline = (f"LONG {pos['qty']:.6f} @ ${pos['entry_price']:,.4f}  "
-                 f"Unreal: {'+ ' if unreal>=0 else ''}${unreal:,.2f}"
-                 if pos else "FLAT")
+
+        if has_sig:
+            sig_badge = f"🟢 <b>BUY SIGNAL TRIGGERED</b>" if result.signal == "BUY" else f"🔴 <b>SELL SIGNAL TRIGGERED</b>"
+        elif is_hot:
+            sig_badge = f"🟡 <b>HOT RADAR ZONE (Dip Setup)</b>"
+        else:
+            sig_badge = f"🟡 <b>SCANNING (Patient Swing)</b>"
+
+        if has_pos:
+            unreal_badge = f"🟢 +${unreal:,.2f}" if unreal >= 0 else f"🔴 -${abs(unreal):,.2f}"
+            pos_line = f"🟢 <b>LONG</b> {pos['qty']:.6f} @ ${pos['entry_price']:,.4f} (Unrealized: {unreal_badge})"
+        else:
+            pos_line = "⚪ <b>FLAT</b> ($0.00)"
+
         total = self.memory.get_total_realized_pnl()
-        tsign = "+" if total >= 0 else ""
+        tsign = f"🟢 +${total:,.4f}" if total >= 0 else f"🔴 -${abs(total):,.4f}"
+
         send_telegram(
-            f"[{self.emoji}] <b>Cycle #{cycle} - {self.symbol}</b>\n"
-            f"Price: <b>${price:,.4f}</b>  {sig}\n"
-            f"AI: {round(win_prob*100)}% Win Prob  Risk: {risk_mult:.2f}x\n"
-            f"<i>{html.escape(result.reason)}</i>\n"
-            f"Pos: {pline}\n"
-            f"Total PnL: {tsign}${total:,.4f}\n"
-            f"<i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            f"[{self.emoji}] <b>{self.symbol}</b> | Cycle #{cycle}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💵 Price: <b>${price:,.4f}</b>\n"
+            f"⚡ Signal: {sig_badge}\n"
+            f"🧠 AI Probability: <b>{round(win_prob*100)}%</b> | Risk: {risk_mult:.2f}x\n"
+            f"📈 Telemetry: <i>{html.escape(result.reason)}</i>\n"
+            f"💼 Position: {pos_line}\n"
+            f"📊 Total Portfolio PnL: <b>{tsign}</b>\n"
+            f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
 
 
