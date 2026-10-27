@@ -280,23 +280,28 @@ class TradeLearner:
     def _calculate_mistake_penalty(self, vec: np.ndarray) -> Tuple[float, str]:
         """
         Calculates penalty if prospective setup matches recent loss regimes.
+        Uses normalized indicator scales to prevent tiny MACD variations from distorting distance.
         Returns: (penalty_prob: float, reason: str)
         """
         if not self.mistake_vectors:
             return 0.0, ""
 
+        # Normalize features by standard ranges: [RSI(100), MACD_Hist(2.0), ATR%(5.0), Vol_Ratio(5.0), ADX(100), SMA_Dist(10.0)]
+        scale = np.array([100.0, 2.0, 5.0, 5.0, 100.0, 10.0], dtype=np.float32)
         min_dist = float("inf")
-        for mv in self.mistake_vectors[-40:]:
-            # Euclidean distance across normalized indicator coordinates
-            diff = (vec - mv) / (np.abs(mv) + 1e-4)
+        vec_norm = vec / scale
+
+        for mv in self.mistake_vectors[-30:]:
+            mv_norm = mv / scale
+            diff = vec_norm - mv_norm
             dist = float(np.linalg.norm(diff))
             if dist < min_dist:
                 min_dist = dist
 
-        # If very close to a known losing setup, penalize win probability
-        if min_dist < 0.35:
-            penalty = round(0.20 * (1.0 - (min_dist / 0.35)), 3)
-            return penalty, f"⚠️ MISTAKE MEMORY ALERT: Setup is {round((1.0 - min_dist/0.35)*100)}% similar to recent losing trade pattern."
+        # If very close to a known losing setup, apply proportional penalty
+        if min_dist < 0.25:
+            penalty = round(0.15 * (1.0 - (min_dist / 0.25)), 3)
+            return penalty, f"⚠️ MISTAKE MEMORY ALERT: Setup is {round((1.0 - min_dist/0.25)*100)}% similar to recent loss pattern."
 
         return 0.0, ""
 
@@ -323,6 +328,7 @@ class TradeLearner:
     def evaluate_signal(self, symbol: str, features: dict) -> Tuple[bool, float, str]:
         """
         Evaluates a candidate signal before placing an order.
+        Blends Random Forest, bounded online SGD, and strategy confidence to prevent veto death-spirals.
         Returns: (approved: bool, win_probability: float, explanation: str)
         """
         if not self.is_trained or self.rf_model is None or self.sgd_model is None:
@@ -335,22 +341,31 @@ class TradeLearner:
         try:
             vec_scaled = self.scaler.transform([vec]).astype(np.float32)
 
-            # Ensemble prediction: 65% Random Forest + 35% SGD Classifier
+            # Extract component probabilities
             rf_prob = self._safe_predict_proba(self.rf_model, vec_scaled)
-            sgd_prob = self._safe_predict_proba(self.sgd_model, vec_scaled)
-            blended_prob = (0.65 * rf_prob) + (0.35 * sgd_prob)
+            sgd_raw = self._safe_predict_proba(self.sgd_model, vec_scaled)
+            # Bound SGD probability to [0.25, 0.75] to prevent catastrophic forgetting
+            sgd_prob = max(0.25, min(0.75, sgd_raw))
+
+            # Blend with strategy confidence (default 0.75)
+            strat_conf = float(features.get("confidence", 0.75) or 0.75)
+            blended_prob = (0.50 * rf_prob) + (0.25 * sgd_prob) + (0.25 * strat_conf)
 
             # Check mistake memory penalty
             penalty, mistake_reason = self._calculate_mistake_penalty(vec)
-            final_prob = max(0.15, min(0.95, blended_prob - penalty))
+            final_prob = max(0.20, min(0.95, blended_prob - penalty))
 
-            # Decision thresholds (Calibrated for Patient Swing Trading & High-Win-Rate Preservation)
-            if final_prob < 0.42:
+            # Decision thresholds
+            if final_prob < 0.38:
+                if strat_conf >= 0.82:
+                    # Strategy has exceptionally high confluence; allow defensive entry
+                    reason = f"⚡ AI APPROVED (High Strategy Confluence Override): {round(final_prob * 100)}% Win Prob. {mistake_reason}".strip()
+                    return True, round(final_prob, 3), reason
                 reason = (f"🛑 AI VETO: Low expected win probability ({round(final_prob * 100)}%). "
                           f"Unfavorable regime. {mistake_reason}".strip())
                 return False, round(final_prob, 3), reason
 
-            if penalty > 0.05 or final_prob < 0.52:
+            if penalty > 0.05 or final_prob < 0.50:
                 reason = (f"⚡ AI APPROVED (Moderate Conviction): {round(final_prob * 100)}% Win Prob. {mistake_reason}".strip())
                 return True, round(final_prob, 3), reason
 

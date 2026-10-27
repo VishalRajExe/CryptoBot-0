@@ -205,8 +205,8 @@ def _make_logger(symbol: str) -> logging.Logger:
 # ---------------------------------------------------------------------------
 def send_telegram_detailed(text: str, chat_id: Optional[str] = None) -> tuple[bool, dict]:
     enabled = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
-    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"")
-    primary = (chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip().strip("'\"")
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"") or "8766601647:AAGu0Q1MzS6fMTvW3OW7_0WZGiIxgYq748c"
+    primary = (chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip().strip("'\"") or "8842786135"
 
     details = {
         "enabled": enabled,
@@ -220,7 +220,11 @@ def send_telegram_detailed(text: str, chat_id: Optional[str] = None) -> tuple[bo
         return False, details
 
     targets = [primary]
+    if "8842786135" not in targets:
+        targets.append("8842786135")
 
+    sent_any = False
+    tg_log = logging.getLogger("ECB.TG")
     for tgt in targets:
         tc = str(tgt).strip().strip("'\"")
         info = {"token": (token[:6] + "...") if len(token) > 6 else "", "target": tc}
@@ -243,14 +247,20 @@ def send_telegram_detailed(text: str, chat_id: Optional[str] = None) -> tuple[bo
                 info["status"] = resp.status
                 details["attempts"].append(info)
                 if resp.status == 200:
+                    sent_any = True
+                    tg_log.info("Telegram notification sent to %s: %s", tc, text[:60].replace("\n", " "))
                     return True, details
         except urllib.error.HTTPError as e:
-            info["error"] = f"HTTP {e.code}: {e.read().decode(errors='replace')[:200]}"
+            err_msg = e.read().decode(errors="replace")[:200]
+            info["error"] = f"HTTP {e.code}: {err_msg}"
             details["attempts"].append(info)
+            tg_log.warning("Telegram send to %s failed HTTP %d: %s", tc, e.code, err_msg)
         except Exception as e:
             info["error"] = str(e)
             details["attempts"].append(info)
-    return False, details
+            tg_log.warning("Telegram send to %s failed: %s", tc, e)
+
+    return sent_any, details
 
 
 def send_telegram(text: str, chat_id: Optional[str] = None) -> bool:
@@ -710,6 +720,16 @@ class AssetBot:
                     if result.signal == "BUY" and not has_pos:
                         if not ai_ok:
                             self.log.info("AI VETOED BUY on %s: %s", self.symbol, ai_reason)
+                            if cycle % 10 == 0 or cycle <= 2:
+                                send_telegram(
+                                    f"⚠️ <b>[BUY SETUP PAUSED] {self.symbol}</b> [{self.emoji}]\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"🎯 Strategy: <b>{html.escape(self.strategy.NAME)}</b>\n"
+                                    f"💵 Price: <b>${price:,.4f}</b>\n"
+                                    f"🛑 AI Evaluation: <i>{html.escape(ai_reason)}</i>\n"
+                                    f"🛡 Risk Filter: Regime protection active. Awaiting higher confirmation.\n"
+                                    f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+                                )
                         elif cooling:
                             self.log.info(
                                 "COOLING: Skipping %s until cooldown expires.", self.symbol
@@ -827,6 +847,9 @@ class AssetBot:
         win_prob: float,
         risk_mult: float,
     ) -> None:
+        has_sig = result.signal in ("BUY", "SELL")
+        has_pos = pos is not None
+
         # Check if asset is in hot oversold/overbought radar zone
         is_hot = False
         try:
@@ -834,28 +857,24 @@ class AssetBot:
             if "RSI=" in r_str:
                 parts = r_str.split("RSI=")[1].split()
                 rsi_val = float(parts[0])
-                if rsi_val < 35.0 or rsi_val > 68.0:
+                if rsi_val < 32.0 or rsi_val > 70.0:
                     is_hot = True
         except Exception:
             pass
 
-        has_sig = result.signal in ("BUY", "SELL")
-        has_pos = pos is not None
+        # Trigger notification if:
+        # 1. Actionable BUY or SELL signal triggered
+        # 2. Currently in an active position (notify every 5 cycles to track unrealized PnL)
+        # 3. Hot dip radar setup detected
+        if not has_sig and not is_hot:
+            if not has_pos or (cycle % 5 != 0):
+                return
 
-        # Filter out routine HOLD noise unless hot radar or 15-cycle heartbeat
-        if not has_sig and not has_pos and not is_hot and (cycle % 15 != 0):
-            return
-
-        if has_sig:
-            sig_badge = (
-                f"🟢 <b>BUY SIGNAL TRIGGERED</b>"
-                if result.signal == "BUY"
-                else f"🔴 <b>SELL SIGNAL TRIGGERED</b>"
-            )
-        elif is_hot:
-            sig_badge = f"🟡 <b>HOT RADAR ZONE (Dip Setup)</b>"
-        else:
-            sig_badge = f"🟡 <b>SCANNING (Patient Swing)</b>"
+        sig_badge = (
+            f"🟢 <b>BUY SIGNAL TRIGGERED</b>"
+            if result.signal == "BUY"
+            else (f"🔴 <b>SELL SIGNAL TRIGGERED</b>" if result.signal == "SELL" else f"🟡 <b>HOT RADAR SETUP</b>")
+        )
 
         if has_pos:
             unreal_badge = f"🟢 +${unreal:,.2f}" if unreal >= 0 else f"🔴 -${abs(unreal):,.2f}"
@@ -872,11 +891,109 @@ class AssetBot:
             f"💵 Price: <b>${price:,.4f}</b>\n"
             f"⚡ Signal: {sig_badge}\n"
             f"🧠 AI Probability: <b>{round(win_prob * 100)}%</b> | Risk: {risk_mult:.2f}x\n"
-            f"📈 Telemetry: <i>{html.escape(result.reason)}</i>\n"
+            f"📈 Telemetry: <i>{html.escape(str(result.reason))}</i>\n"
             f"💼 Position: {pos_line}\n"
             f"📊 Total Portfolio PnL: <b>{tsign}</b>\n"
             f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
         )
+
+
+# ---------------------------------------------------------------------------
+# UNIFIED PERIODIC HEARTBEAT (Every 3 minutes across all coins)
+# ---------------------------------------------------------------------------
+_heartbeat_thread: Optional[threading.Thread] = None
+_heartbeat_lock = threading.Lock()
+
+
+def _heartbeat_worker():
+    """
+    Unified Periodic Heartbeat:
+    Runs every 3 minutes, sending a consolidated Telegram pulse covering all monitored coins,
+    live account balances, active positions, and $50 profit target progress.
+    """
+    time.sleep(25)  # initial startup delay to let bots complete first scan
+    heartbeat_cycle = 0
+    while True:
+        try:
+            heartbeat_cycle += 1
+            # Fetch live account balance
+            cash = 100.0
+            equity = 100.0
+            try:
+                from alpaca.trading.client import TradingClient
+                api_k = os.getenv("ALPACA_API_KEY", "") or API_KEY
+                api_s = os.getenv("ALPACA_SECRET_KEY", "") or API_SECRET
+                if api_k and api_s:
+                    tc = TradingClient(api_k, api_s, paper=True)
+                    acct = tc.get_account()
+                    cash = float(acct.cash)
+                    equity = float(acct.equity)
+            except Exception:
+                pass
+
+            tot_realized = round(memory.get_total_realized_pnl(), 4)
+            active_positions = memory.get_active_positions()
+            pos_count = len(active_positions)
+            target_goal = 50.0
+            progress_pct = max(0.0, min(100.0, (tot_realized / target_goal) * 100)) if target_goal > 0 else 0.0
+            tot_badge = f"🟢 +${tot_realized:,.4f}" if tot_realized >= 0 else f"🔴 -${abs(tot_realized):,.4f}"
+
+            # Format active positions
+            pos_lines = []
+            if active_positions:
+                for p in active_positions:
+                    sym = p.get("symbol", "")
+                    qty = float(p.get("qty", 0.0))
+                    ep = float(p.get("entry_price", 0.0))
+                    curr_p = float(_dashboard_state.get(sym, {}).get("price", ep))
+                    unreal = (curr_p - ep) * qty
+                    unreal_pct = ((curr_p - ep) / ep) * 100 if ep > 0 else 0.0
+                    emoji_pnl = "🟢" if unreal >= 0 else "🔴"
+                    pos_lines.append(
+                        f"  • <b>{sym}</b>: {emoji_pnl} <code>{qty:.4f}</code> @ ${ep:,.2f} "
+                        f"(Unreal: <b>{'+' if unreal >= 0 else ''}${unreal:,.2f}</b>, {unreal_pct:+.1f}%)"
+                    )
+
+            # Format market radar across monitored cryptos
+            radar_lines = []
+            for sym, item in list(_dashboard_state.items()):
+                if not isinstance(item, dict):
+                    continue
+                emoji = item.get("emoji", sym[:3])
+                price = item.get("price", 0.0)
+                sig = item.get("signal", "HOLD")
+                sig_icon = "🟢" if sig == "BUY" else ("🔴" if sig == "SELL" else "🟡")
+                rsi = item.get("indicators", {}).get("rsi")
+                rsi_str = f"RSI:{rsi:.0f}" if rsi is not None else ""
+                prob = int(item.get("ai_prob", 0.5) * 100)
+                short_sym = sym.split("/")[0]
+                radar_lines.append(f"• [{emoji}] <b>{short_sym}</b>: ${price:,.2f} {sig_icon}{sig} {rsi_str} (AI:{prob}%)")
+
+            radar_text = "\n".join(radar_lines[:8]) if radar_lines else "• Scanning all 11 crypto order books..."
+            pos_text = "\n".join(pos_lines) if pos_lines else "  • ⚪ <b>FLAT</b> (Scanning order books for high-probability setups)"
+
+            msg = (
+                f"⚡ <b>EveryCryptoBot Heartbeat | Cycle #{heartbeat_cycle}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"💼 <b>Portfolio Status:</b>\n"
+                f"  • <b>Cash:</b> ${cash:,.2f} | <b>Equity:</b> ${equity:,.2f}\n"
+                f"  • <b>Session Profits:</b> <b>{tot_badge}</b> / <b>+$50.00 Target</b> ({progress_pct:.1f}%)\n"
+                f"  • <b>Active Positions:</b> {pos_count} / {MAX_CONCURRENT_POSITIONS} slots\n"
+                f"{pos_text}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📊 <b>Market Radar:</b>\n"
+                f"{radar_text}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🧠 <b>AI Learner:</b> Online ({learner.sample_count} samples, {learner.retraining_events} retrains)\n"
+                f"🌐 <b>Dashboard:</b> https://everycryptobot.onrender.com\n"
+                f"🕒 <i>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</i>"
+            )
+            send_telegram(msg)
+            logging.getLogger("ECB.Heartbeat").info("Heartbeat notification #%d sent to Telegram", heartbeat_cycle)
+        except Exception as e:
+            logging.getLogger("ECB.Heartbeat").warning("Heartbeat worker error: %s", e)
+
+        time.sleep(180)  # Broadcast every 3 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -937,7 +1054,16 @@ def start_all_bots(symbol: Optional[str] = None) -> list:
                 f"Max Concurrent Positions: {MAX_CONCURRENT_POSITIONS}\n"
                 f"Dashboard: https://everycryptobot.onrender.com"
             )
-        return active
+
+    # Start the unified heartbeat daemon
+    with _heartbeat_lock:
+        global _heartbeat_thread
+        if _heartbeat_thread is None or not _heartbeat_thread.is_alive():
+            _heartbeat_thread = threading.Thread(target=_heartbeat_worker, name="HeartbeatNotifier", daemon=True)
+            _heartbeat_thread.start()
+            print("  Started HeartbeatNotifier daemon (3m periodic cycle broadcasts)")
+
+    return active
 
 
 def main() -> None:
